@@ -11,7 +11,6 @@ import {
   LanguageModelChatMessage,
   LanguageModelChatMessageRole,
   LanguageModelChatProvider,
-  LanguageModelChatToolMode,
   LanguageModelDataPart,
   LanguageModelResponsePart,
   LanguageModelTextPart,
@@ -383,7 +382,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
                                 typeof delta?.content === 'string'
                                   ? delta.content
                                   : Array.isArray(delta?.content)
-                                    ? delta.content.map((c: any) => (typeof c?.text === 'string' ? c.text : '')).join('')
+                                    ? delta.content
+                                        .map((c: any) => (typeof c?.text === 'string' ? c.text : ''))
+                                        .join('')
                                     : undefined,
                               reasoning_content:
                                 typeof delta?.reasoning_content === 'string' ? delta.reasoning_content : undefined,

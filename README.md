@@ -120,6 +120,19 @@ You can enable/disable MCP servers in VS Code settings:
 2. Search for "Z.ai"
 3. Enable/disable individual MCP servers as needed
 
+### Troubleshooting
+
+- **`command 'z-chat.manageApiKey' not found`**
+  - Ensure you are running the latest extension build and reload VS Code (`Developer: Reload Window`).
+  - This usually indicates extension activation failed before command registration.
+
+- **Selecting Z.ai in Model Manager does nothing**
+  - This is typically the same activation issue as above; update/reload the extension first.
+
+- **No registered MCP servers**
+  - MCP servers are only returned after a valid API key is available.
+  - MCP registration depends on VS Code builds that include MCP provider APIs. In builds without that API, the extension still works for chat/models, but MCP server registration is skipped.
+
 ## 🛠️ Development
 
 ### Prerequisites
