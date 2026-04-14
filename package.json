@@ -50,19 +50,6 @@
     "watch": "run-p watch:*"
   },
   "contributes": {
-    "commands": [
-      {
-        "command": "z-chat.manageApiKey",
-        "title": "Z: Manage API Key"
-      }
-    ],
-    "languageModelChatProviders": [
-      {
-        "vendor": "z",
-        "displayName": "Z AI",
-        "managementCommand": "z-chat.manageApiKey"
-      }
-    ],
     "chatParticipants": [
       {
         "id": "z-models-vscode.z",
@@ -72,10 +59,10 @@
         "isSticky": true
       }
     ],
-    "mcpServerDefinitionProviders": [
+    "commands": [
       {
-        "id": "zModels.mcpServers",
-        "label": "Z Models MCP Servers"
+        "command": "z-chat.manageApiKey",
+        "title": "Z: Manage API Key"
       }
     ],
     "configuration": {
@@ -117,7 +104,20 @@
           "description": "Enable zread MCP server"
         }
       }
-    }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "z",
+        "displayName": "Z AI",
+        "managementCommand": "z-chat.manageApiKey"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "zModels.mcpServers",
+        "label": "Z Models MCP Servers"
+      }
+    ]
   },
   "activationEvents": [
     "onStartupFinished",
@@ -133,14 +133,14 @@
   },
   "dependencies": {
     "@selfagency/llm-stream-parser": "^0.1.5",
-    "dotenv": "^16.6.1",
+    "dotenv": "17.4.2",
     "ky": "2.0.1",
     "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "@octokit/rest": "^22.0.1",
     "@types/node": "^25.6.0",
-    "@types/vscode": "^1.115.0",
+    "@types/vscode": "^1.109.0",
     "@typescript/native-preview": "7.0.0-dev.20260414.1",
     "@vitest/coverage-v8": "^4.1.4",
     "@vscode/dts": "^0.4.1",
