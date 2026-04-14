@@ -61,19 +61,19 @@ export class UsageStatusBar implements vscode.Disposable {
     if (!this.currentUsage) return;
     const usage = this.currentUsage;
     const hourlyQuota = this.pickHourlyQuota(usage);
+    const weeklyQuota = this.pickWeeklyQuota(usage);
     const hourPct = hourlyQuota?.percentage ?? 0;
+    const weekPct = weeklyQuota?.percentage ?? hourPct;
 
     if (this.viewMode === 'hourly') {
-      this.item.text = `Z · ${hourPct}% of 5 Hours`;
+      this.item.text = `$(graph) Z · ${hourPct}% of 5 Hours`;
     } else {
-      const weekQuota = usage.tokenQuotas.find(q => q.unit === 6);
-      const weekPct = weekQuota?.percentage ?? hourPct;
-      this.item.text = `Z · ${weekPct}% of Week`;
+      this.item.text = `$(graph) Z · ${weekPct}% of Week`;
     }
 
     this.item.tooltip = this.buildTooltip(usage);
 
-    const warnPct = this.viewMode === 'hourly' ? hourPct : (usage.tokenQuotas.find(q => q.unit === 6)?.percentage ?? hourPct);
+    const warnPct = this.viewMode === 'hourly' ? hourPct : weekPct;
     if (warnPct >= 95) {
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     } else if (warnPct >= 80) {
@@ -84,16 +84,38 @@ export class UsageStatusBar implements vscode.Disposable {
   }
 
   private pickHourlyQuota(usage: UsageData) {
+    // Prefer explicit hour-based windows (unit=3), then choose the smallest hour window.
+    const hourly = usage.tokenQuotas
+      .filter(q => q.unit === 3)
+      .sort((a, b) => a.number - b.number);
+    if (hourly.length > 0) return hourly[0];
+
+    // Fallback: keep prior behavior for unexpected payloads.
     return usage.tokenQuotas
       .slice()
       .sort((a, b) => a.unit * a.number - b.unit * b.number)[0];
+  }
+
+  private pickWeeklyQuota(usage: UsageData) {
+    // Prefer explicit week-based windows (unit=6), then choose the smallest week window.
+    const weekly = usage.tokenQuotas
+      .filter(q => q.unit === 6)
+      .sort((a, b) => a.number - b.number);
+    if (weekly.length > 0) return weekly[0];
+
+    // Fallback: if no weekly data exists, reuse hourly quota.
+    return this.pickHourlyQuota(usage);
   }
 
   private buildTooltip(usage: UsageData): string {
     const lines: string[] = [];
 
     const plan = this.fmtPlan(usage.planLevel);
-    if (plan) lines.push(`Plan: ${plan}`, '');
+    if (plan) {
+      lines.push(`Z.ai ${plan} plan`, '');
+    } else {
+      lines.push('Z.ai plan', '');
+    }
 
     for (const q of usage.tokenQuotas) {
       lines.push(`${q.windowName}: ${q.percentage}%`);
@@ -116,8 +138,10 @@ export class UsageStatusBar implements vscode.Disposable {
   }
 
   private progressBar(pct: number, width: number): string {
-    const filled = Math.round((pct / 100) * width);
-    return '█'.repeat(filled) + '░'.repeat(width - filled);
+    const safeWidth = Math.max(1, width);
+    const clampedPct = Math.max(0, Math.min(100, pct));
+    const filled = Math.round((clampedPct / 100) * safeWidth);
+    return '█'.repeat(filled) + '░'.repeat(safeWidth - filled);
   }
 
   private fmtReset(ms: number): string {
