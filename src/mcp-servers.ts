@@ -1,4 +1,4 @@
-import ky, { HTTPError } from 'ky';
+import got, { HTTPError } from 'got';
 import { CancellationToken, Progress } from 'vscode';
 
 // Note: ModelContextProvider and ModelContextValue are not yet available in the stable VS Code API
@@ -31,12 +31,12 @@ async function fetchFromZAI(
       }
     }
 
-    return await ky
+    return await got
       .get(url.toString(), {
         headers: {
           Authorization: `Bearer ${Z_AI_API_KEY}`,
         },
-        retry: 0,
+        retry: { limit: 0 },
       })
       .json<any>();
   } catch (error) {
@@ -45,7 +45,7 @@ async function fetchFromZAI(
       throw error;
     }
 
-    if (error instanceof HTTPError && error.response.status === 429) {
+    if (error instanceof HTTPError && error.response.statusCode === 429) {
       console.warn(`Rate limit exceeded. Retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchFromZAI(endpoint, params, retries - 1, delay * 2);

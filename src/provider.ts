@@ -1,6 +1,6 @@
 import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
 import { config as loadDotenv } from 'dotenv';
-import ky from 'ky';
+import got from 'got';
 import { get_encoding, Tiktoken } from 'tiktoken';
 import {
   CancellationToken,
@@ -84,12 +84,12 @@ export function getChatModelInfo(model: ZModel): LanguageModelChatInformation {
     id: model.id,
     name: model.name,
     // Intentionally omit tooltip: VS Code uses it as the picker description in the
-    // chat window, overriding the detail field. Without it, detail: 'Z AI' is
+    // chat window, overriding the detail field. Without it, detail: 'Z.ai' is
     // shown correctly alongside the model in both the chat window and manage models view.
     family: 'z',
     // Short, consistent description shown alongside the model in the chat window
     // and manage models dropdown.
-    detail: 'Z AI',
+    detail: 'Z.ai',
     maxInputTokens: model.maxInputTokens,
     maxOutputTokens: model.maxOutputTokens,
     version: '1.0.0',
@@ -116,8 +116,43 @@ export type ZToolCall = {
 
 export type ZMessage =
   | { role: 'user'; content: ZContent }
-  | { role: 'assistant'; content: ZContent | null; toolCalls?: ZToolCall[] }
-  | { role: 'tool'; content: string | null; toolCallId: string; name?: string };
+  | { role: 'assistant'; content: ZContent | null; tool_calls?: ZToolCall[] }
+  | { role: 'tool'; content: string | null; tool_call_id: string; name?: string };
+
+/**
+ * Supported `options.modelOptions` keys for Z.ai requests.
+ *
+ * This type intentionally mirrors user-facing knobs that we accept today.
+ * Unknown keys are ignored.
+ */
+export interface ZSupportedModelOptions {
+  temperature?: number;
+  topP?: number;
+  safePrompt?: boolean;
+
+  // Thinking controls
+  thinking?: boolean;
+  thinkingType?: 'enabled' | 'disabled';
+  clearThinking?: boolean;
+  clear_thinking?: boolean;
+
+  // Structured output / JSON mode
+  jsonMode?: boolean;
+  responseFormat?: 'json_object' | { type: 'json_object' };
+
+  // Web search tool helper
+  webSearch?: boolean | Record<string, unknown>;
+  web_search?: boolean | Record<string, unknown>;
+}
+
+interface ZParsedRequestOptions {
+  temperature: number;
+  topP?: number;
+  safePrompt?: boolean;
+  thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
+  responseFormat?: { type: 'json_object' };
+  webSearchTool?: { type: 'web_search'; web_search: Record<string, unknown> };
+}
 
 /**
  * Z Chat Model Provider
@@ -186,8 +221,32 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         model: string;
         messages: ZMessage[];
         maxTokens: number;
-        tools?: Array<{ type: 'function'; function: { name: string; description?: string; parameters: unknown } }>;
-      }) => AsyncIterable<{ data: { choices: Array<{ delta: { content?: string } }> } }>;
+        tools?: Array<Record<string, unknown>>;
+        toolChoice?: 'auto' | 'none';
+        toolStream?: boolean;
+        thinking?: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
+        responseFormat?: { type: 'json_object' };
+        temperature?: number;
+        topP?: number;
+        safePrompt?: boolean;
+      }) => AsyncIterable<{
+        data: {
+          choices: Array<{
+            delta: {
+              content?: string;
+              reasoning_content?: string;
+              tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                type?: string;
+                function?: { name?: string; arguments?: string };
+              }>;
+            };
+            finish_reason?: string | null;
+          }>;
+          usage?: { prompt_tokens_details?: { cached_tokens?: number } };
+        };
+      }>;
     };
   } {
     const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
@@ -200,10 +259,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       models: {
         list: async () => {
           try {
-            const data = await ky
+            const data = await got
               .get(`${baseUrl}/models`, {
                 headers,
-                retry: 0,
+                retry: { limit: 0 },
               })
               .json<any>();
             return { data: Array.isArray(data?.data) ? data.data : [] };
@@ -214,51 +273,207 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         },
       },
       chat: {
-        stream: async function* ({ model, messages, maxTokens, tools }) {
-          const response = await ky
-            .post(`${baseUrl}/chat/completions`, {
-              headers,
-              retry: 0,
-              json: {
-                model,
-                messages,
-                max_tokens: maxTokens,
-                tools,
-                stream: true,
-              },
-            })
-            .text();
+        stream: async function* ({
+          model,
+          messages,
+          maxTokens,
+          tools,
+          toolChoice,
+          toolStream,
+          thinking,
+          responseFormat,
+          temperature,
+          topP,
+          safePrompt,
+        }) {
+          const gotStream = got.stream.post(`${baseUrl}/chat/completions`, {
+            headers,
+            retry: { limit: 0 },
+            json: {
+              model,
+              messages,
+              max_tokens: maxTokens,
+              temperature,
+              top_p: topP,
+              safe_prompt: safePrompt,
+              tools,
+              tool_choice: toolChoice,
+              tool_stream: toolStream,
+              thinking,
+              response_format: responseFormat,
+              stream: true,
+            },
+          });
 
-          // Best-effort SSE parsing. If response is not SSE, emit full body as one chunk.
-          if (!response.includes('data:')) {
-            yield { data: { choices: [{ delta: { content: response } }] } };
-            return;
+          let buffer = '';
+          let hasSeenSseLine = false;
+
+          for await (const chunk of gotStream) {
+            buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            for (const rawLine of lines) {
+              const line = rawLine.trim();
+              if (!line.startsWith('data:')) continue;
+              hasSeenSseLine = true;
+              const payload = line.slice('data:'.length).trim();
+              if (!payload || payload === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(payload) as any;
+                const choice = parsed?.choices?.[0];
+                const delta = choice?.delta;
+                const hasDelta =
+                  delta !== undefined &&
+                  (delta.content !== undefined ||
+                    delta.reasoning_content !== undefined ||
+                    delta.tool_calls !== undefined);
+                if (hasDelta || choice?.finish_reason !== undefined || parsed?.usage !== undefined) {
+                  yield {
+                    data: {
+                      choices: [
+                        {
+                          delta: {
+                            content:
+                              typeof delta?.content === 'string'
+                                ? delta.content
+                                : Array.isArray(delta?.content)
+                                  ? delta.content.map((c: any) => (typeof c?.text === 'string' ? c.text : '')).join('')
+                                  : undefined,
+                            reasoning_content:
+                              typeof delta?.reasoning_content === 'string' ? delta.reasoning_content : undefined,
+                            tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
+                          },
+                          finish_reason: choice?.finish_reason ?? null,
+                        },
+                      ],
+                      usage: parsed?.usage,
+                    },
+                  };
+                }
+              } catch {
+                // Ignore malformed SSE frames.
+              }
+            }
           }
 
-          const lines = response.split('\n');
-          for (const rawLine of lines) {
-            const line = rawLine.trim();
-            if (!line.startsWith('data:')) {
-              continue;
-            }
-
-            const payload = line.slice('data:'.length).trim();
-            if (!payload || payload === '[DONE]') {
-              continue;
-            }
-
-            try {
-              const parsed = JSON.parse(payload) as any;
-              const content = parsed?.choices?.[0]?.delta?.content;
-              if (typeof content === 'string' && content.length > 0) {
-                yield { data: { choices: [{ delta: { content } }] } };
+          // Flush any remaining buffer content.
+          const remaining = buffer.trim();
+          if (remaining) {
+            if (remaining.startsWith('data:')) {
+              const payload = remaining.slice('data:'.length).trim();
+              if (payload && payload !== '[DONE]') {
+                try {
+                  const parsed = JSON.parse(payload) as any;
+                  const choice = parsed?.choices?.[0];
+                  const delta = choice?.delta;
+                  const hasDelta =
+                    delta !== undefined &&
+                    (delta.content !== undefined ||
+                      delta.reasoning_content !== undefined ||
+                      delta.tool_calls !== undefined);
+                  if (hasDelta || choice?.finish_reason !== undefined || parsed?.usage !== undefined) {
+                    yield {
+                      data: {
+                        choices: [
+                          {
+                            delta: {
+                              content:
+                                typeof delta?.content === 'string'
+                                  ? delta.content
+                                  : Array.isArray(delta?.content)
+                                    ? delta.content.map((c: any) => (typeof c?.text === 'string' ? c.text : '')).join('')
+                                    : undefined,
+                              reasoning_content:
+                                typeof delta?.reasoning_content === 'string' ? delta.reasoning_content : undefined,
+                              tool_calls: Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined,
+                            },
+                            finish_reason: choice?.finish_reason ?? null,
+                          },
+                        ],
+                        usage: parsed?.usage,
+                      },
+                    };
+                  }
+                } catch {
+                  // Ignore malformed SSE frames.
+                }
               }
-            } catch {
-              // Ignore malformed SSE frames.
+            } else if (!hasSeenSseLine) {
+              // Non-SSE response: emit full body as a single chunk.
+              yield { data: { choices: [{ delta: { content: remaining } }] } };
             }
           }
         },
       },
+    };
+  }
+
+  /**
+   * Parse and normalize VS Code `modelOptions` into Z API request fields.
+   *
+   * Accepted keys are documented by `ZSupportedModelOptions`.
+   */
+  private parseModelOptions(modelOptionsRaw: unknown, foundModel: ZModel): ZParsedRequestOptions {
+    const modelOptions = ((modelOptionsRaw as Record<string, unknown>) ?? {}) as ZSupportedModelOptions;
+
+    const temperature =
+      typeof modelOptions.temperature === 'number' ? modelOptions.temperature : (foundModel.temperature ?? 0.7);
+    const topP = typeof modelOptions.topP === 'number' ? modelOptions.topP : (foundModel.top_p ?? undefined);
+    const safePrompt = typeof modelOptions.safePrompt === 'boolean' ? modelOptions.safePrompt : undefined;
+
+    const thinkingType =
+      modelOptions.thinking === false || modelOptions.thinkingType === 'disabled' ? 'disabled' : 'enabled';
+    const clearThinking =
+      typeof modelOptions.clearThinking === 'boolean'
+        ? modelOptions.clearThinking
+        : typeof modelOptions.clear_thinking === 'boolean'
+          ? modelOptions.clear_thinking
+          : undefined;
+    const thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean } = {
+      type: thinkingType,
+      ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}),
+    };
+
+    const responseFormat =
+      modelOptions.responseFormat === 'json_object' || modelOptions.jsonMode === true
+        ? { type: 'json_object' as const }
+        : typeof modelOptions.responseFormat === 'object' && modelOptions.responseFormat
+          ? (modelOptions.responseFormat as { type: 'json_object' })
+          : undefined;
+
+    const webSearchEnabled =
+      modelOptions.webSearch === true ||
+      typeof modelOptions.webSearch === 'object' ||
+      modelOptions.web_search === true ||
+      typeof modelOptions.web_search === 'object';
+
+    const webSearchConfig =
+      typeof modelOptions.webSearch === 'object' && modelOptions.webSearch
+        ? modelOptions.webSearch
+        : typeof modelOptions.web_search === 'object' && modelOptions.web_search
+          ? modelOptions.web_search
+          : {
+              enable: true,
+              search_engine: 'search-prime',
+              search_result: true,
+            };
+
+    const webSearchTool = webSearchEnabled
+      ? {
+          type: 'web_search' as const,
+          web_search: webSearchConfig,
+        }
+      : undefined;
+
+    return {
+      temperature,
+      topP,
+      safePrompt,
+      thinking,
+      responseFormat,
+      webSearchTool,
     };
   }
 
@@ -597,7 +812,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     // Check if client is initialized
     if (!this.client) {
-      progress.report(new LanguageModelTextPart('Please add your Z API key to use Z AI.'));
+      progress.report(new LanguageModelTextPart('Please add your Z.ai API key to use Z.ai for Copilot.'));
       return;
     }
 
@@ -630,26 +845,29 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }));
 
     const shouldSendTools = zTools && zTools.length > 0;
-    const _toolChoice = shouldSendTools
-      ? options.toolMode === LanguageModelChatToolMode.Required
-        ? 'any'
-        : 'auto'
-      : undefined;
-    const _parallelToolCalls = shouldSendTools ? (foundModel.supportsParallelToolCalls ?? false) : undefined;
 
     // Allow VS Code modelOptions to override some request parameters.
-    const modelOptions = (options.modelOptions ?? {}) as Record<string, unknown>;
-    const _temperature =
-      typeof modelOptions.temperature === 'number' ? modelOptions.temperature : (foundModel.temperature ?? 0.7);
-    const _topP = typeof modelOptions.topP === 'number' ? modelOptions.topP : (foundModel.top_p ?? undefined);
-    const _safePrompt = typeof modelOptions.safePrompt === 'boolean' ? modelOptions.safePrompt : undefined;
+    const parsedOptions = this.parseModelOptions(options.modelOptions, foundModel);
+    const { temperature, topP, safePrompt, thinking, responseFormat, webSearchTool } = parsedOptions;
+
+    const requestTools: Array<Record<string, unknown>> = [
+      ...(shouldSendTools ? zTools : []),
+      ...(webSearchTool ? [webSearchTool] : []),
+    ];
 
     try {
       const streamResult = await this.client.chat.stream({
         model: model.id,
         messages: _zMessages,
         maxTokens: Math.min(foundModel.defaultCompletionTokens, foundModel.maxOutputTokens),
-        tools: zTools,
+        temperature,
+        topP,
+        safePrompt,
+        tools: requestTools.length > 0 ? requestTools : undefined,
+        toolChoice: requestTools.length > 0 ? 'auto' : undefined,
+        toolStream: requestTools.length > 0 ? true : undefined,
+        thinking,
+        responseFormat,
       });
 
       const streamProcessor = new LLMStreamProcessor({
@@ -672,14 +890,94 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }
       });
 
+      // Accumulate tool call argument deltas — arguments arrive in pieces across multiple SSE frames.
+      const toolCallBuffers = new Map<number, { id: string; name: string; arguments: string }>();
+      const emittedToolCalls = new Set<string>();
+
       for await (const chunk of streamResult) {
-        const content = chunk?.data?.choices?.[0]?.delta?.content;
+        if (token.isCancellationRequested) {
+          break;
+        }
+
+        const delta = chunk?.data?.choices?.[0]?.delta;
+        const finishReason = chunk?.data?.choices?.[0]?.finish_reason;
+        const cachedTokens = chunk?.data?.usage?.prompt_tokens_details?.cached_tokens;
+        if (typeof cachedTokens === 'number') {
+          this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
+        }
+
+        const content = delta?.content;
         if (typeof content === 'string' && content.length > 0) {
           streamProcessor.process({ content });
+        }
+
+        const reasoning = delta?.reasoning_content;
+        if (typeof reasoning === 'string' && reasoning.length > 0) {
+          streamProcessor.process({ thinking: reasoning });
+        }
+
+        const toolCallDeltas = delta?.tool_calls;
+        if (Array.isArray(toolCallDeltas)) {
+          for (const tc of toolCallDeltas) {
+            const idx = tc.index ?? 0;
+            if (!toolCallBuffers.has(idx)) {
+              toolCallBuffers.set(idx, { id: tc.id ?? '', name: tc.function?.name ?? '', arguments: '' });
+            }
+            const buf = toolCallBuffers.get(idx)!;
+            if (tc.id) buf.id = tc.id;
+            if (tc.function?.name) buf.name = tc.function.name;
+            if (tc.function?.arguments) buf.arguments += tc.function.arguments;
+
+            if (buf.id && buf.name && buf.arguments && !emittedToolCalls.has(buf.id)) {
+              try {
+                const parsed = JSON.parse(buf.arguments) as Record<string, unknown>;
+                const vsCodeId = this.getOrCreateVsCodeToolCallId(buf.id);
+                progress.report(new LanguageModelToolCallPart(vsCodeId, buf.name, parsed));
+                emittedToolCalls.add(buf.id);
+                this.log.info(`[Z] tool call streamed: ${buf.name} (id=${vsCodeId})`);
+              } catch {
+                // Keep buffering until JSON becomes valid.
+              }
+            }
+          }
+        }
+
+        if (finishReason === 'tool_calls' || finishReason === 'stop') {
+          for (const [, tc] of toolCallBuffers) {
+            if (!tc.name || !tc.id || emittedToolCalls.has(tc.id)) {
+              continue;
+            }
+            let input: Record<string, unknown> = {};
+            try {
+              input = JSON.parse(tc.arguments || '{}') as Record<string, unknown>;
+            } catch {
+              input = { _raw: tc.arguments };
+            }
+            const vsCodeId = this.getOrCreateVsCodeToolCallId(tc.id);
+            progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, input));
+            emittedToolCalls.add(tc.id);
+            this.log.info(`[Z] tool call flushed: ${tc.name} (id=${vsCodeId})`);
+          }
         }
       }
 
       streamProcessor.flush();
+
+      // Emit accumulated tool calls after streaming completes.
+      for (const [, tc] of toolCallBuffers) {
+        if (tc.name && tc.id && !emittedToolCalls.has(tc.id)) {
+          const vsCodeId = this.getOrCreateVsCodeToolCallId(tc.id);
+          let input: Record<string, unknown> = {};
+          try {
+            input = JSON.parse(tc.arguments || '{}') as Record<string, unknown>;
+          } catch {
+            input = { _raw: tc.arguments };
+          }
+          progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, input));
+          this.log.info(`[Z] tool call emitted: ${tc.name} (id=${vsCodeId})`);
+          emittedToolCalls.add(tc.id);
+        }
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       this.log.error(
@@ -797,7 +1095,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             role,
             // If this assistant message is only tool calls, prefer `null` content (matches SDK schema).
             content: messageContent ?? (hasToolCalls ? null : ''),
-            toolCalls: hasToolCalls ? toolCalls : undefined,
+            tool_calls: hasToolCalls ? toolCalls : undefined,
           });
         }
       } else {
@@ -811,7 +1109,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         out.push({
           role: 'tool',
           content: tr.content,
-          toolCallId: tr.callId,
+          tool_call_id: tr.callId,
           name: toolNameByCallId.get(tr.callId),
         });
       }

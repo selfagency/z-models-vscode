@@ -15,7 +15,8 @@
     "copilot",
     "chat",
     "coding",
-    "code assistant"
+    "code assistant",
+    "glm"
   ],
   "repository": {
     "type": "git",
@@ -54,8 +55,8 @@
       {
         "id": "z-models-vscode.z",
         "name": "z",
-        "fullName": "Z AI",
-        "description": "Ask questions using Z AI models",
+        "fullName": "Z.ai",
+        "description": "Ask questions using Z.ai models",
         "isSticky": true
       }
     ],
@@ -108,14 +109,16 @@
     "languageModelChatProviders": [
       {
         "vendor": "z",
-        "displayName": "Z AI",
-        "managementCommand": "z-chat.manageApiKey"
+        "displayName": "Z.ai",
+        "configuration": {
+          "managementCommand": "z-chat.manageApiKey"
+        }
       }
     ],
     "mcpServerDefinitionProviders": [
       {
         "id": "zModels.mcpServers",
-        "label": "Z Models MCP Servers"
+        "label": "Z.ai MCP Servers"
       }
     ]
   },
@@ -134,7 +137,7 @@
   "dependencies": {
     "@selfagency/llm-stream-parser": "^0.1.5",
     "dotenv": "17.4.2",
-    "ky": "2.0.1",
+    "got": "^15.0.2",
     "tiktoken": "^1.0.22"
   },
   "devDependencies": {

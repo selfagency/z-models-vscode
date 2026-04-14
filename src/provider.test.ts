@@ -421,7 +421,7 @@ describe('ZChatModelProvider — toZMessages', () => {
 
   it('converts a plain text assistant message', () => {
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('Hi'))]);
-    expect(msgs).toEqual([{ role: 'assistant', content: 'Hi', toolCalls: undefined }]);
+    expect(msgs).toEqual([{ role: 'assistant', content: 'Hi', tool_calls: undefined }]);
   });
 
   it('skips empty user messages', () => {
@@ -442,10 +442,10 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msg = msgs[0] as any;
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBeNull();
-    expect(msg.toolCalls).toHaveLength(1);
-    expect(msg.toolCalls[0].type).toBe('function');
-    expect(msg.toolCalls[0].function.name).toBe('search_files');
-    expect(JSON.parse(msg.toolCalls[0].function.arguments)).toEqual({ query: 'foo' });
+    expect(msg.tool_calls).toHaveLength(1);
+    expect(msg.tool_calls[0].type).toBe('function');
+    expect(msg.tool_calls[0].function.name).toBe('search_files');
+    expect(JSON.parse(msg.tool_calls[0].function.arguments)).toEqual({ query: 'foo' });
   });
 
   it('converts a tool result message into role="tool"', () => {
@@ -457,7 +457,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const toolMsg = msgs.find((m: any) => m.role === 'tool') as any;
     expect(toolMsg).toBeDefined();
     expect(toolMsg.content).toBe('file contents');
-    expect(typeof toolMsg.toolCallId).toBe('string');
+    expect(typeof toolMsg.tool_call_id).toBe('string');
   });
 
   it('uses text content for tool result when available', () => {
@@ -506,7 +506,7 @@ describe('ZChatModelProvider — toZMessages', () => {
 
     const msg = msgs[0] as any;
     expect(msg.content).toBe('thinking...');
-    expect(msg.toolCalls).toHaveLength(1);
+    expect(msg.tool_calls).toHaveLength(1);
   });
 });
 
@@ -535,7 +535,7 @@ describe('toZMessages Edge Cases', () => {
     const msg = msgs[0] as any;
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBe('Hello');
-    expect(msg.toolCalls).toHaveLength(1);
+    expect(msg.tool_calls).toHaveLength(1);
   });
 
   it('should handle messages with multiple tool results', () => {
@@ -957,6 +957,97 @@ describe('Chat Response Edge Cases', () => {
     );
 
     expect(mockProgress.report).toHaveBeenCalledWith(expect.objectContaining({ value: 'Error: Network error' }));
+  });
+});
+
+// ── Model Options Helper ───────────────────────────────────────────────────
+
+describe('Model Options Helper', () => {
+  let provider: ZChatModelProvider;
+
+  const baseModel = {
+    id: 'glm-5.1',
+    name: 'GLM 5.1',
+    maxInputTokens: 128000,
+    maxOutputTokens: 16384,
+    defaultCompletionTokens: 65536,
+    toolCalling: true,
+    supportsParallelToolCalls: true,
+    supportsVision: true,
+    temperature: 0.7,
+  };
+
+  beforeEach(() => {
+    provider = new ZChatModelProvider(mockContext, undefined, false);
+  });
+
+  it('parses supported modelOptions into normalized request options', () => {
+    const parsed = (provider as any).parseModelOptions(
+      {
+        temperature: 0.2,
+        topP: 0.9,
+        safePrompt: true,
+        thinkingType: 'disabled',
+        clearThinking: false,
+        jsonMode: true,
+        webSearch: true,
+      },
+      baseModel,
+    );
+
+    expect(parsed.temperature).toBe(0.2);
+    expect(parsed.topP).toBe(0.9);
+    expect(parsed.safePrompt).toBe(true);
+    expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
+    expect(parsed.responseFormat).toEqual({ type: 'json_object' });
+    expect(parsed.webSearchTool).toBeDefined();
+    expect(parsed.webSearchTool.type).toBe('web_search');
+  });
+
+  it('is used by provideLanguageModelChatResponse and feeds payload fields', async () => {
+    const mockApiKey = 'test-api-key';
+    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue(mockApiKey);
+
+    await (provider as any).initClient(true);
+
+    const parseSpy = vi.spyOn(provider as any, 'parseModelOptions');
+    const streamSpy = vi.fn().mockResolvedValue(
+      (async function* () {
+        yield {
+          data: {
+            choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }],
+          },
+        };
+      })(),
+    );
+
+    (provider as any).client = {
+      models: { list: vi.fn().mockResolvedValue({ data: [baseModel] }) },
+      chat: { stream: streamSpy },
+    };
+
+    await provider.provideLanguageModelChatResponse(
+      baseModel as any,
+      [{ role: LanguageModelChatMessageRole.User, content: [new LanguageModelTextPart('hi')], name: undefined }] as any,
+      {
+        modelOptions: {
+          thinkingType: 'disabled',
+          clearThinking: false,
+          jsonMode: true,
+          webSearch: true,
+        },
+      } as any,
+      { report: vi.fn() } as any,
+      { isCancellationRequested: false } as any,
+    );
+
+    expect(parseSpy).toHaveBeenCalled();
+    const payload = streamSpy.mock.calls[0][0];
+    expect(payload.thinking).toEqual({ type: 'disabled', clear_thinking: false });
+    expect(payload.responseFormat).toEqual({ type: 'json_object' });
+    expect(payload.toolStream).toBe(true);
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect(payload.tools.some((t: any) => t.type === 'web_search')).toBe(true);
   });
 });
 
