@@ -64,6 +64,24 @@ export interface ZModel {
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
+function inferToolCallingFromModelId(id: string): boolean {
+  return /^glm-/i.test(id);
+}
+
+function inferVisionFromModelId(id: string): boolean {
+  return /(?:4\.5v|vision|vl)/i.test(id);
+}
+
+function resolveModelCapabilities(model: any): { completionChat: boolean; functionCalling: boolean; vision: boolean } {
+  const id = typeof model?.id === 'string' ? model.id : '';
+  return {
+    completionChat: model?.capabilities?.completionChat ?? /^glm-/i.test(id),
+    functionCalling:
+      model?.toolCalling ?? model?.capabilities?.functionCalling ?? inferToolCallingFromModelId(id),
+    vision: model?.supportsVision ?? model?.capabilities?.vision ?? inferVisionFromModelId(id),
+  };
+}
+
 /**
  * Prettify a model ID into a display name when the API doesn't provide one.
  * e.g. "z-large-latest" → "Z Large Latest"
@@ -618,18 +636,19 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         return this.fetchedModels;
       }
 
-      const chatModels = zModels.filter(m => m?.capabilities?.completionChat !== false);
+      const chatModels = zModels.filter(m => resolveModelCapabilities(m).completionChat !== false);
 
       const rawModels = chatModels.map(m => ({
+        capabilities: resolveModelCapabilities(m),
         id: m.id,
         originalName: m.name ?? formatModelName(m.id),
         detail: m.detail ?? m.description ?? undefined,
         maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? 32768,
         maxOutputTokens: m.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         defaultCompletionTokens: m.defaultCompletionTokens ?? DEFAULT_COMPLETION_TOKENS,
-        toolCalling: m.toolCalling ?? m.capabilities?.functionCalling ?? false,
-        supportsParallelToolCalls: m.supportsParallelToolCalls ?? m.capabilities?.functionCalling ?? false,
-        supportsVision: m.supportsVision ?? m.capabilities?.vision ?? false,
+        toolCalling: resolveModelCapabilities(m).functionCalling,
+        supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
+        supportsVision: resolveModelCapabilities(m).vision,
         temperature: m.temperature ?? m.defaultModelTemperature ?? undefined,
       }));
 

@@ -250,6 +250,31 @@ describe('ZChatModelProvider — fetchModels', () => {
     expect(model.temperature).toBe(0.7);
   });
 
+  it('infers tool calling for bare GLM models when the API only returns ids', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-5.1', object: 'model', created: 1, owned_by: 'z-ai' }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.id).toBe('glm-5.1');
+    expect(model.toolCalling).toBe(true);
+    expect(model.supportsParallelToolCalls).toBe(true);
+    expect(model.supportsVision).toBe(false);
+  });
+
+  it('infers vision support for vision-flavored model ids when metadata is missing', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-4.5v', object: 'model', created: 1, owned_by: 'z-ai' }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.id).toBe('glm-4.5v');
+    expect(model.toolCalling).toBe(true);
+    expect(model.supportsVision).toBe(true);
+  });
+
   it('falls back to formatModelName when name is null', async () => {
     const noName = { ...chatModel, name: null };
     const mockList = vi.fn().mockResolvedValue({ data: [noName] });
