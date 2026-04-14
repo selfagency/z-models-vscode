@@ -1,4 +1,5 @@
 import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
+import { randomBytes } from 'node:crypto';
 import got from 'got';
 import { get_encoding, Tiktoken } from 'tiktoken';
 import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
@@ -102,9 +103,12 @@ interface ZParsedRequestOptions {
  * Implements VS Code's LanguageModelChatProvider interface for GitHub Copilot Chat
  */
 export class ZChatModelProvider implements LanguageModelChatProvider {
+  private static readonly MODEL_CACHE_TTL_MS = 30 * 60 * 1000;
+
   private client: any | null = null;
   private tokenizer: Tiktoken | null = null;
   private fetchedModels: ZModel[] | null = null;
+  private modelCacheTimestamp = 0;
   private initPromise?: Promise<boolean>;
   private mcpConfig: MCPServerConfig = {
     vision: true,
@@ -172,6 +176,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         temperature?: number;
         topP?: number;
         safePrompt?: boolean;
+        abortSignal?: AbortSignal;
       }) => AsyncIterable<{
         data: {
           choices: Array<{
@@ -247,10 +252,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           temperature,
           topP,
           safePrompt,
+          abortSignal,
         }) {
           const gotStream = got.stream.post(`${baseUrl}/chat/completions`, {
             headers,
             retry,
+            signal: abortSignal,
             json: {
               model,
               messages,
@@ -508,12 +515,11 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Generate a valid VS Code tool call ID (alphanumeric, exactly 9 characters)
    */
   public generateToolCallId(): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let id = '';
-    for (let i = 0; i < 9; i++) {
-      id += chars.charAt(Math.floor(Math.random() * chars.length));
+    const bytes = randomBytes(8).toString('base64url').replace(/[^a-zA-Z0-9]/g, '');
+    if (bytes.length >= 9) {
+      return bytes.slice(0, 9);
     }
-    return id;
+    return `${bytes}${randomBytes(8).toString('hex')}`.slice(0, 9);
   }
 
   /**
@@ -543,7 +549,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Returns an empty array if the client is not initialized or the request fails.
    */
   public async fetchModels(): Promise<ZModel[]> {
-    if (this.fetchedModels !== null) {
+    if (
+      this.fetchedModels !== null &&
+      Date.now() - this.modelCacheTimestamp < ZChatModelProvider.MODEL_CACHE_TTL_MS
+    ) {
       return this.fetchedModels;
     }
 
@@ -578,6 +587,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
       if (!Array.isArray(zModels) || zModels.length === 0) {
         this.fetchedModels = [];
+        this.modelCacheTimestamp = Date.now();
         return this.fetchedModels;
       }
 
@@ -649,11 +659,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         supportsVision: rm.supportsVision,
         temperature: rm.temperature,
       }));
+      this.modelCacheTimestamp = Date.now();
       // Notify VS Code that models are available
       this._onDidChangeLanguageModelChatInformation.fire(undefined);
       return this.fetchedModels;
     } catch (error) {
-      console.error('Failed to fetch Z models:', error);
+      this.log.error('[Z] Failed to fetch models: ' + String(error));
       return [];
     }
   }
@@ -706,6 +717,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }
     this.client = this.createHttpClient(apiKey);
     this.fetchedModels = null;
+    this.modelCacheTimestamp = 0;
+    this._onDidChangeLanguageModelChatInformation.fire(undefined);
 
     return apiKey;
   }
@@ -737,7 +750,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    */
   async provideLanguageModelChatInformation(
     options: { silent: boolean },
-    _token: CancellationToken,
+    token: CancellationToken,
   ): Promise<LanguageModelChatInformation[]> {
     this.log.info('[Z] provideLanguageModelChatInformation called (silent=' + options.silent + ')');
     // If an activation-triggered init is in-flight, wait for it to finish before proceeding.
@@ -756,7 +769,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       return [];
     }
 
+    if (token.isCancellationRequested) {
+      this.log.debug('[Z] provideLanguageModelChatInformation cancelled before model fetch');
+      return [];
+    }
+
     const models = await this.fetchModels();
+    if (token.isCancellationRequested) {
+      this.log.debug('[Z] provideLanguageModelChatInformation cancelled after model fetch');
+      return [];
+    }
     this.log.info('[Z] Returning ' + models.length + ' models');
     return models.map(model => getChatModelInfo(model));
   }
@@ -820,6 +842,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       ...(webSearchTool ? [webSearchTool] : []),
     ];
 
+    const abortController = new AbortController();
+    const cancellationSubscription =
+      typeof token.onCancellationRequested === 'function'
+        ? token.onCancellationRequested(() => {
+            abortController.abort();
+            this.log.info('[Z] chat request cancelled by user');
+          })
+        : { dispose: () => {} };
+
     try {
       const streamResult = await this.client.chat.stream({
         model: model.id,
@@ -833,6 +864,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         toolStream: requestTools.length > 0 ? true : undefined,
         thinking,
         responseFormat,
+        abortSignal: abortController.signal,
       });
 
       const streamProcessor = new LLMStreamProcessor({
@@ -916,7 +948,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             try {
               input = JSON.parse(tc.arguments || '{}') as Record<string, unknown>;
             } catch {
-              input = { _raw: tc.arguments };
+              this.log.warn(`[Z] Skipping malformed streamed tool call arguments for '${tc.name}'.`);
+              continue;
             }
             const vsCodeId = this.getOrCreateVsCodeToolCallId(tc.id);
             progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, input));
@@ -936,7 +969,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           try {
             input = JSON.parse(tc.arguments || '{}') as Record<string, unknown>;
           } catch {
-            input = { _raw: tc.arguments };
+            this.log.warn(`[Z] Skipping malformed buffered tool call arguments for '${tc.name}'.`);
+            continue;
           }
           progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, input));
           this.log.info(`[Z] tool call emitted: ${tc.name} (id=${vsCodeId})`);
@@ -950,6 +984,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           (error instanceof Error ? error.stack || error.message : String(error)),
       );
       progress.report(new LanguageModelTextPart(`Error: ${errorMessage}`));
+    } finally {
+      cancellationSubscription.dispose();
     }
   }
 
@@ -1128,6 +1164,17 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     const tokens = this.tokenizer.encode(textContent);
     return tokens.length;
+  }
+
+  dispose(): void {
+    this._onDidChangeLanguageModelChatInformation.dispose();
+    if (this.tokenizer) {
+      this.tokenizer.free();
+      this.tokenizer = null;
+    }
+    this.client = null;
+    this.fetchedModels = null;
+    this.modelCacheTimestamp = 0;
   }
 }
 

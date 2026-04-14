@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
 
+let activeProvider: ZChatModelProvider | undefined;
+
 function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageModelChatMessage[] {
   const messages: vscode.LanguageModelChatMessage[] = [];
 
@@ -27,21 +29,13 @@ function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageMode
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  let logOutputChannel: vscode.LogOutputChannel | undefined;
-  try {
-    logOutputChannel =
-      typeof vscode.window.createOutputChannel === 'function'
-        ? (vscode.window.createOutputChannel('Z Models', { log: true }) as vscode.LogOutputChannel)
-        : undefined;
-  } catch {
-    // Older VS Code builds may not support the options object overload.
-    logOutputChannel = undefined;
-  }
+  const logOutputChannel = vscode.window.createOutputChannel('Z Models', { log: true }) as vscode.LogOutputChannel;
 
   let provider: ZChatModelProvider | undefined;
   const getProvider = (): ZChatModelProvider => {
     if (!provider) {
       provider = new ZChatModelProvider(context, logOutputChannel, true);
+      activeProvider = provider;
     }
     return provider;
   };
@@ -150,7 +144,7 @@ export function activate(context: vscode.ExtensionContext) {
     messages.push(vscode.LanguageModelChatMessage.User(request.prompt));
 
     try {
-      const response = await request.model.sendRequest(messages, {}, token);
+      const response = await request.model.sendRequest(messages, undefined, token);
       for await (const chunk of response.stream) {
         if (chunk instanceof vscode.LanguageModelTextPart) {
           stream.markdown(chunk.value);
@@ -192,4 +186,9 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(participant);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  if (activeProvider && typeof (activeProvider as any).dispose === 'function') {
+    activeProvider.dispose();
+  }
+  activeProvider = undefined;
+}

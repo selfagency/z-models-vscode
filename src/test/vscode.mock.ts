@@ -105,6 +105,14 @@ export const window = {
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
   showInformationMessage: vi.fn(),
+  createOutputChannel: vi.fn().mockReturnValue({
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    appendLine: vi.fn(),
+    dispose: vi.fn(),
+  }),
 };
 
 export const lm = {
