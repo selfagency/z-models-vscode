@@ -141,7 +141,8 @@ export class UsageStatusBar implements vscode.Disposable {
     const safeWidth = Math.max(1, width);
     const clampedPct = Math.max(0, Math.min(100, pct));
     const filled = Math.round((clampedPct / 100) * safeWidth);
-    return '█'.repeat(filled) + '░'.repeat(safeWidth - filled);
+    // Use ASCII chars for consistent visual width in tooltip fonts.
+    return `[${'#'.repeat(filled)}${'-'.repeat(safeWidth - filled)}]`;
   }
 
   private fmtReset(ms: number): string {
