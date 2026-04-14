@@ -25,6 +25,7 @@
 - 🖼️ **Vision** - Image input support for models that support it
 - 🔒 **Secure** - API key stored using VS Code's encrypted secrets API
 - ⚡ **Streaming** - Real-time response streaming for faster interactions
+- 📊 **Usage Status Bar** - Status bar item tracks subscription usage limits
 
 ## 🔧 Requirements
 
@@ -69,16 +70,10 @@ Type `@z` in any Copilot Chat input to direct the conversation to Z.ai. The part
 
 ### Usage Status Bar
 
-When a `Z_API_KEY` is configured, the extension shows a usage item on the **right side** of the status bar.
-
-- Hourly view: `$(graph) Z · {num}% of 5 Hours`
-- Weekly view: `$(graph) Z · {num}% of Week`
-
-Click the status bar item to toggle between hourly and weekly views.
+When a `Z_API_KEY` is configured, the extension shows a usage item on the right side of the status bar. Click the status bar item to toggle between hourly and weekly views.
 
 Tooltip includes:
 
-- `Z.ai {Plan} plan` (auto-detected from Z.ai quota API)
 - Token quota windows and progress bars
 - MCP time-limit usage windows
 - Last updated time
