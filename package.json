@@ -94,6 +94,14 @@
       {
         "command": "z-chat.manageSettings",
         "title": "Z: Manage Settings"
+      },
+      {
+        "command": "z-chat.refreshUsage",
+        "title": "Z: Refresh Usage Stats"
+      },
+      {
+        "command": "z-chat.showUsageDetails",
+        "title": "Z: Show Usage Details"
       }
     ],
     "configuration": {
@@ -133,6 +141,17 @@
           "type": "boolean",
           "default": true,
           "description": "Enable zread MCP server"
+        },
+        "zModels.usage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Z.ai usage percentage in the status bar"
+        },
+        "zModels.usage.refreshInterval": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "How often (in minutes) to refresh Z.ai usage data"
         }
       }
     },

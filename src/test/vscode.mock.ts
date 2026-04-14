@@ -116,6 +116,18 @@ export class LanguageModelError extends Error {
   }
 }
 
+export const StatusBarAlignment = {
+  Left: 1,
+  Right: 2,
+} as const;
+
+export const QuickPickItemKind = {
+  Default: 0,
+  Separator: 1,
+} as const;
+
+export const ThemeColor = vi.fn().mockImplementation((id: string) => ({ id }));
+
 export const window = {
   showInputBox: vi.fn(),
   showQuickPick: vi.fn(),
@@ -127,6 +139,15 @@ export const window = {
     error: vi.fn(),
     appendLine: vi.fn(),
     dispose: vi.fn(),
+  }),
+  createStatusBarItem: vi.fn().mockReturnValue({
+    text: '',
+    tooltip: '',
+    command: undefined,
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
+    backgroundColor: undefined,
   }),
 };
 

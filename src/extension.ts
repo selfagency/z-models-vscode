@@ -1,8 +1,13 @@
 import * as vscode from 'vscode';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
+import { UsageService } from './usage-service.js';
+import { UsageStatusBar } from './usage-status-bar.js';
 
 let activeProvider: ZChatModelProvider | undefined;
+let activeUsageService: UsageService | undefined;
+let activeUsageBar: UsageStatusBar | undefined;
+let usageRefreshTimer: ReturnType<typeof setInterval> | undefined;
 
 // Read extension version for User-Agent at module level
 let extVersion = 'unknown';
@@ -127,6 +132,74 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(logOutputChannel);
   }
 
+  // ── Usage tracking status bar ──────────────────────────────────────────
+  const usageBar = new UsageStatusBar();
+  activeUsageBar = usageBar;
+  context.subscriptions.push(usageBar);
+
+  const refreshUsage = async () => {
+    const apiKey = await context.secrets.get('Z_API_KEY');
+    if (!apiKey || !apiKey.trim()) {
+      usageBar.showNoKey();
+      return;
+    }
+    usageBar.showLoading();
+    try {
+      const svc = activeUsageService ?? new UsageService(apiKey);
+      if (!activeUsageService) {
+        activeUsageService = svc;
+      } else {
+        svc.updateApiKey(apiKey);
+      }
+      const result = await svc.fetchUsage();
+      if (result.success && result.data) {
+        usageBar.updateUsage(result.data);
+        logOutputChannel?.info(`[Z] Usage updated: ${result.data.tokenQuotas.map(q => `${q.windowName}=${q.percentage}%`).join(', ')}`);
+      } else {
+        usageBar.showError(result.error ?? 'Failed to fetch usage');
+        logOutputChannel?.warn(`[Z] Usage fetch failed: ${result.error}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      usageBar.showError(msg);
+      logOutputChannel?.error(`[Z] Usage error: ${msg}`);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('z-chat.refreshUsage', refreshUsage),
+    vscode.commands.registerCommand('z-chat.showUsageDetails', async () => {
+      await usageBar.showQuickPick();
+    }),
+  );
+
+  // Initial fetch + periodic refresh
+  void refreshUsage();
+  const setupRefreshTimer = () => {
+    if (usageRefreshTimer) clearInterval(usageRefreshTimer);
+    const interval = vscode.workspace.getConfiguration('zModels').get<number>('usage.refreshInterval', 5);
+    usageRefreshTimer = setInterval(() => void refreshUsage(), interval * 60_000);
+  };
+  setupRefreshTimer();
+
+  // Refresh when API key changes
+  if (context.secrets?.onDidChange) {
+    context.subscriptions.push(
+      context.secrets.onDidChange(event => {
+        if (event.key === 'Z_API_KEY') void refreshUsage();
+      }),
+    );
+  }
+
+  // Adjust refresh interval when settings change
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('zModels.usage.refreshInterval')) {
+        setupRefreshTimer();
+      }
+    }),
+  );
+
   const participantHandler: vscode.ChatRequestHandler = async (
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
@@ -197,6 +270,15 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+  if (usageRefreshTimer) {
+    clearInterval(usageRefreshTimer);
+    usageRefreshTimer = undefined;
+  }
+  if (activeUsageBar) {
+    activeUsageBar.dispose();
+    activeUsageBar = undefined;
+  }
+  activeUsageService = undefined;
   if (activeProvider && typeof (activeProvider as any).dispose === 'function') {
     activeProvider.dispose();
   }
