@@ -140,9 +140,11 @@ export class UsageStatusBar implements vscode.Disposable {
   private progressBar(pct: number, width: number): string {
     const safeWidth = Math.max(1, width);
     const clampedPct = Math.max(0, Math.min(100, pct));
-    const filled = Math.round((clampedPct / 100) * safeWidth);
-    // Use ASCII chars for consistent visual width in tooltip fonts.
-    return `[${'#'.repeat(filled)}${'-'.repeat(safeWidth - filled)}]`;
+    const markerPos = Math.round((clampedPct / 100) * safeWidth);
+    const left = '-'.repeat(Math.max(0, markerPos));
+    const right = '-'.repeat(Math.max(0, safeWidth - markerPos));
+    // Constant-length gauge: same number of '-' and one '|', regardless of percentage.
+    return `[${left}|${right}]`;
   }
 
   private fmtReset(ms: number): string {
