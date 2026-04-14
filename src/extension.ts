@@ -168,8 +168,8 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('z-chat.refreshUsage', refreshUsage),
-    vscode.commands.registerCommand('z-chat.showUsageDetails', async () => {
-      await usageBar.showQuickPick();
+    vscode.commands.registerCommand('z-chat.toggleUsageView', async () => {
+      usageBar.toggleView();
     }),
   );
 

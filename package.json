@@ -100,8 +100,8 @@
         "title": "Z: Refresh Usage Stats"
       },
       {
-        "command": "z-chat.showUsageDetails",
-        "title": "Z: Show Usage Details"
+        "command": "z-chat.toggleUsageView",
+        "title": "Z: Toggle Usage View (Hourly/Weekly)"
       }
     ],
     "configuration": {
