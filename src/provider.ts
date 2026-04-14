@@ -1,7 +1,8 @@
 import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
-import { config as loadDotenv } from 'dotenv';
 import got from 'got';
 import { get_encoding, Tiktoken } from 'tiktoken';
+import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
+import { toZRole } from './role-utils.js';
 import {
   CancellationToken,
   Event,
@@ -9,7 +10,6 @@ import {
   ExtensionContext,
   LanguageModelChatInformation,
   LanguageModelChatMessage,
-  LanguageModelChatMessageRole,
   LanguageModelChatProvider,
   LanguageModelDataPart,
   LanguageModelResponsePart,
@@ -23,13 +23,8 @@ import {
   workspace,
 } from 'vscode';
 
-// Optional local-dev convenience: load .env values when available.
-// Secret storage remains the primary source of truth.
-// For deterministic unit tests, this is disabled unless explicitly opted in.
+// For deterministic unit tests, environment fallback can be explicitly enabled.
 const allowEnvInTests = process.env.Z_MODELS_ALLOW_ENV_API_KEY_IN_TESTS === '1';
-if (!process.env.VITEST || allowEnvInTests) {
-  loadDotenv();
-}
 
 /**
  * MCP Server configuration
@@ -43,79 +38,10 @@ export interface MCPServerConfig {
 
 type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
 
-/**
- * Z model configuration
- */
-export interface ZModel {
-  id: string;
-  name: string;
-  detail?: string;
-  maxInputTokens: number;
-  maxOutputTokens: number;
-  defaultCompletionTokens: number;
-  toolCalling: boolean;
-  supportsParallelToolCalls: boolean;
-  supportsVision?: boolean;
-  temperature?: number;
-  top_p?: number;
-}
-
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
-function inferToolCallingFromModelId(id: string): boolean {
-  return /^glm-/i.test(id);
-}
-
-function inferVisionFromModelId(id: string): boolean {
-  return /(?:4\.5v|vision|vl)/i.test(id);
-}
-
-function resolveModelCapabilities(model: any): { completionChat: boolean; functionCalling: boolean; vision: boolean } {
-  const id = typeof model?.id === 'string' ? model.id : '';
-  return {
-    completionChat: model?.capabilities?.completionChat ?? /^glm-/i.test(id),
-    functionCalling:
-      model?.toolCalling ?? model?.capabilities?.functionCalling ?? inferToolCallingFromModelId(id),
-    vision: model?.supportsVision ?? model?.capabilities?.vision ?? inferVisionFromModelId(id),
-  };
-}
-
-/**
- * Prettify a model ID into a display name when the API doesn't provide one.
- * e.g. "z-large-latest" → "Z Large Latest"
- */
-export function formatModelName(id: string): string {
-  return id
-    .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-/**
- * Get chat model information for VS Code Language Model API
- */
-export function getChatModelInfo(model: ZModel): LanguageModelChatInformation {
-  return {
-    id: model.id,
-    name: model.name,
-    // Intentionally omit tooltip: VS Code uses it as the picker description in the
-    // chat window, overriding the detail field. Without it, detail: 'Z.ai' is
-    // shown correctly alongside the model in both the chat window and manage models view.
-    family: 'z',
-    // Short, consistent description shown alongside the model in the chat window
-    // and manage models dropdown.
-    detail: 'Z.ai',
-    maxInputTokens: model.maxInputTokens,
-    maxOutputTokens: model.maxOutputTokens,
-    version: '1.0.0',
-    capabilities: {
-      toolCalling: model.toolCalling,
-      imageInput: model.supportsVision ?? false,
-    },
-  };
-}
 
 /**
  * Message types for Z API
@@ -272,6 +198,25 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       'Content-Type': 'application/json',
     };
 
+    const retry = {
+      limit: 3,
+      statusCodes: [408, 413, 429, 500, 502, 503, 504],
+      calculateDelay: ({ attemptCount, error, retryOptions }: any) => {
+        if (attemptCount > retryOptions.limit) {
+          return 0;
+        }
+
+        const statusCode = error?.response?.statusCode;
+        if (statusCode && !retryOptions.statusCodes.includes(statusCode)) {
+          return 0;
+        }
+
+        const base = 300;
+        const cap = 3000;
+        return Math.min(base * 2 ** (attemptCount - 1), cap);
+      },
+    };
+
     return {
       models: {
         list: async () => {
@@ -279,7 +224,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             const data = await got
               .get(`${baseUrl}/models`, {
                 headers,
-                retry: { limit: 0 },
+                retry,
               })
               .json<any>();
             return { data: Array.isArray(data?.data) ? data.data : [] };
@@ -305,7 +250,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }) {
           const gotStream = got.stream.post(`${baseUrl}/chat/completions`, {
             headers,
-            retry: { limit: 0 },
+            retry,
             json: {
               model,
               messages,
@@ -739,9 +684,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         if (!value || value.trim().length === 0) {
           return 'API key is required';
         }
-        // Z API keys are typically long alphanumeric strings
-        if (value.length < 20) {
-          return 'API key appears too short';
+        // Basic key shape guard; don't leak or log value.
+        if (value.length < 20 || !/^[A-Za-z0-9._-]+$/.test(value)) {
+          return 'API key format appears invalid';
         }
         return undefined;
       },
@@ -1157,8 +1102,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     if (typeof text === 'string') {
       textContent = text;
     } else {
+      const parts = Array.isArray(text.content) ? text.content : [text.content];
+
       // Extract text from message parts including tool calls and results
-      textContent = text.content
+      textContent = parts
         .map(part => {
           if (part instanceof LanguageModelTextPart) {
             return part.value;
@@ -1171,6 +1118,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
               .filter(resultPart => resultPart instanceof LanguageModelTextPart)
               .map(resultPart => (resultPart as LanguageModelTextPart).value)
               .join('');
+          } else if (typeof part === 'string') {
+            return part;
           }
           return '';
         })
@@ -1183,15 +1132,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 }
 
 /**
- * Convert VS Code message role to Z role
+ * Re-export selected model/role helpers for compatibility with existing tests/imports.
  */
-export function toZRole(role: LanguageModelChatMessageRole): 'user' | 'assistant' {
-  switch (role) {
-    case LanguageModelChatMessageRole.User:
-      return 'user';
-    case LanguageModelChatMessageRole.Assistant:
-      return 'assistant';
-    default:
-      return 'user';
-  }
-}
+export { formatModelName, getChatModelInfo, toZRole };
+export type { ZModel };

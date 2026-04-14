@@ -10,7 +10,9 @@
     "vitest"
   ],
   "categories": {},
-  "rules": {},
+  "rules": {
+    "vitest/require-mock-type-parameters": "off"
+  },
   "settings": {
     "jsdoc": {
       "ignorePrivate": false,

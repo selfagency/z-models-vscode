@@ -55,7 +55,8 @@ describe('getChatModelInfo', () => {
     const info = getChatModelInfo(base);
     expect(info.id).toBe('z-large-latest');
     expect(info.name).toBe('Z Large');
-    expect(info.family).toBe('z');
+    expect(info.family).toBe('z-large');
+    expect(info.version).toBe('z-large-latest');
     expect(info.maxInputTokens).toBe(128000);
     expect(info.maxOutputTokens).toBe(16384);
     expect(info.capabilities?.toolCalling).toBe(true);
@@ -191,6 +192,26 @@ describe('ZChatModelProvider — tool call ID mapping', () => {
       const after = provider.getOrCreateVsCodeToolCallId('z-refresh');
       expect(after).toMatch(/^[a-zA-Z0-9]{9}$/);
       expect(provider.getZToolCallId(before)).toBeUndefined();
+    });
+
+    it('handles many mappings without losing round-trip consistency', () => {
+      const pairs: Array<{ z: string; vs: string }> = [];
+      for (let i = 0; i < 200; i++) {
+        const z = `z-${i}`;
+        const vs = provider.getOrCreateVsCodeToolCallId(z);
+        pairs.push({ z, vs });
+      }
+
+      for (const pair of pairs) {
+        expect(provider.getZToolCallId(pair.vs)).toBe(pair.z);
+      }
+    });
+
+    it('keeps same VS Code id when repeated z id is requested many times', () => {
+      const first = provider.getOrCreateVsCodeToolCallId('z-collision');
+      for (let i = 0; i < 50; i++) {
+        expect(provider.getOrCreateVsCodeToolCallId('z-collision')).toBe(first);
+      }
     });
   });
 });
@@ -1156,6 +1177,16 @@ describe('Token Count Provision', () => {
     expect(tokenCount).toBeGreaterThan(0);
   });
 
+  it('should count tokens for a message with string content', async () => {
+    const message = {
+      role: LanguageModelChatMessageRole.User,
+      content: 'Hello, world!',
+      name: undefined,
+    };
+    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    expect(tokenCount).toBeGreaterThan(0);
+  });
+
   it('should count tokens for a message with tool calls', async () => {
     const message = {
       role: LanguageModelChatMessageRole.Assistant,
@@ -1213,7 +1244,7 @@ describe('Clear Tool Call ID Mappings Edge Cases', () => {
   });
 
   it('should allow new mappings after clearing', () => {
-    const vsCodeId1 = provider.getOrCreateVsCodeToolCallId('z-id-1');
+    const _vsCodeId1 = provider.getOrCreateVsCodeToolCallId('z-id-1');
     provider.clearToolCallIdMappings();
 
     const vsCodeId2 = provider.getOrCreateVsCodeToolCallId('z-id-1');

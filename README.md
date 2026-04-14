@@ -29,7 +29,7 @@
 ## 🔧 Requirements
 
 - **VS Code** 1.109.0 or higher
-- **GitHub Copilot Chat** extension installed
+- **GitHub Copilot Chat** extension installed (required)
 - A valid **Z.ai API key**
 
 ## 🚀 Installation
@@ -38,6 +38,7 @@
 2. **Open Command Palette** (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 3. **Run:** `Z: Manage API Key`
 4. **Enter your API key** from [z.ai](https://z.ai/manage-apikey/apikey-list)
+5. *(Optional)* **Run:** `Z: Manage Settings` to switch endpoint mode
 
 ## 🔑 Getting Your API Key
 
@@ -96,6 +97,7 @@ Notes:
 - Requests use streaming (`stream: true`) and tool streaming (`tool_stream: true`) when tools are present.
 - Tool calls are assembled incrementally from SSE deltas and emitted as soon as arguments become valid JSON.
 - Cache usage is automatic server-side; cached prompt token counts are logged when returned by the API (`usage.prompt_tokens_details.cached_tokens`).
+- Token counting in VS Code uses a compatible approximation (`cl100k_base`) and should be treated as an estimate for GLM models.
 
 ## 🛡️ Privacy & Security
 
@@ -130,7 +132,7 @@ You can enable/disable MCP servers in VS Code settings:
   - This is typically the same activation issue as above; update/reload the extension first.
 
 - **No registered MCP servers**
-  - MCP servers are only returned after a valid API key is available.
+  - MCP server definitions are registered eagerly, but they are only resolvable/startable after a valid API key is stored.
   - MCP registration depends on VS Code builds that include MCP provider APIs. In builds without that API, the extension still works for chat/models, but MCP server registration is skipped.
 
 ## 🛠️ Development

@@ -5,7 +5,9 @@ import {
   ChatResponseMarkdownPart,
   ChatResponseTurn,
   commands,
+  LanguageModelError,
   LanguageModelTextPart,
+  l10n,
   lm,
   MarkdownString,
 } from 'vscode';
@@ -19,8 +21,12 @@ vi.mock('./provider', () => ({
 
 describe('extension', () => {
   const mockContext = {
+    secrets: {
+      get: vi.fn().mockResolvedValue(undefined),
+      onDidChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+    },
     subscriptions: { push: vi.fn() },
-    extensionUri: '/fake-extension',
+    extensionUri: { toString: () => 'file:///fake-extension' },
   } as any;
 
   beforeEach(() => {
@@ -38,6 +44,11 @@ describe('extension', () => {
       expect(commands.registerCommand).toHaveBeenCalledWith('z-chat.manageApiKey', expect.any(Function));
     });
 
+    it('registers the manageSettings command', () => {
+      activate(mockContext);
+      expect(commands.registerCommand).toHaveBeenCalledWith('z-chat.manageSettings', expect.any(Function));
+    });
+
     it('pushes provider, mcp, and command disposables in the first subscription push', () => {
       activate(mockContext);
       // Provider and command are in the first push; MCP is a separate guarded push.
@@ -48,6 +59,12 @@ describe('extension', () => {
     it('creates the @z chat participant', () => {
       activate(mockContext);
       expect(chat.createChatParticipant).toHaveBeenCalledWith('z-models-vscode.z', expect.any(Function));
+    });
+
+    it('sets a followup provider on the chat participant', () => {
+      activate(mockContext);
+      const participant = (chat.createChatParticipant as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+      expect(participant.followupProvider).toBeDefined();
     });
 
     it('pushes participant disposable into context.subscriptions', () => {
@@ -159,6 +176,56 @@ describe('extension', () => {
       });
 
       expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('model unavailable'));
+    });
+
+    it('handles /clear slash command without model invocation', async () => {
+      const handler = await getHandler();
+      const mockStream = { markdown: vi.fn() };
+      const mockSendRequest = vi.fn();
+
+      await handler(
+        { prompt: 'ignored', command: 'clear', model: { sendRequest: mockSendRequest } },
+        { history: [] },
+        mockStream,
+        { isCancellationRequested: false },
+      );
+
+      expect(mockSendRequest).not.toHaveBeenCalled();
+      expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('new chat thread'));
+    });
+
+    it('handles /model slash command without model invocation', async () => {
+      const handler = await getHandler();
+      const mockStream = { markdown: vi.fn() };
+      const mockSendRequest = vi.fn();
+
+      await handler(
+        { prompt: 'ignored', command: 'model', model: { sendRequest: mockSendRequest } },
+        { history: [] },
+        mockStream,
+        { isCancellationRequested: false },
+      );
+
+      expect(mockSendRequest).not.toHaveBeenCalled();
+      expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('model picker'));
+    });
+
+    it('formats LanguageModelError via l10n', async () => {
+      const handler = await getHandler();
+      const mockStream = { markdown: vi.fn() };
+      const lmError = new LanguageModelError('blocked');
+      (lmError as any).code = 'off_topic';
+      const mockSendRequest = vi.fn().mockRejectedValue(lmError);
+
+      await handler(
+        { prompt: 'hi', model: { sendRequest: mockSendRequest } },
+        { history: [] },
+        mockStream,
+        { isCancellationRequested: false },
+      );
+
+      expect(l10n.t).toHaveBeenCalled();
+      expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('off_topic'));
     });
   });
 
