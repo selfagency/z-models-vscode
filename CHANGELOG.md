@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-04-14
+
+## What's Changed
+* feat: add Z.ai usage status bar with hourly/weekly toggle and quota UX improvements by @selfagency in https://github.com/selfagency/z-models-vscode/pull/4
+
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.3...v0.1.4
+
+_Source: changes from v0.1.3 to v0.1.4._
+
+
 ## What's Changed
 * feat: add Z.ai usage status bar item with auto-detected plan and quota polling
 * refactor: simplify usage status bar UX (right-side placement, hourly/weekly toggle, simplified tooltip)
