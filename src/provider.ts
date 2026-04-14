@@ -1,9 +1,7 @@
 import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
-import { randomBytes } from 'node:crypto';
 import got from 'got';
+import { randomBytes } from 'node:crypto';
 import { get_encoding, Tiktoken } from 'tiktoken';
-import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
-import { toZRole } from './role-utils.js';
 import {
   CancellationToken,
   Event,
@@ -23,6 +21,8 @@ import {
   window,
   workspace,
 } from 'vscode';
+import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
+import { toZRole } from './role-utils.js';
 
 // For deterministic unit tests, environment fallback can be explicitly enabled.
 const allowEnvInTests = process.env.Z_MODELS_ALLOW_ENV_API_KEY_IN_TESTS === '1';
@@ -42,7 +42,6 @@ type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
-
 
 /**
  * Message types for Z API
@@ -517,7 +516,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Generate a valid VS Code tool call ID (alphanumeric, exactly 9 characters)
    */
   public generateToolCallId(): string {
-    const bytes = randomBytes(8).toString('base64url').replace(/[^a-zA-Z0-9]/g, '');
+    const bytes = randomBytes(8)
+      .toString('base64url')
+      .replace(/[^a-zA-Z0-9]/g, '');
     if (bytes.length >= 9) {
       return bytes.slice(0, 9);
     }
@@ -551,10 +552,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Returns an empty array if the client is not initialized or the request fails.
    */
   public async fetchModels(): Promise<ZModel[]> {
-    if (
-      this.fetchedModels !== null &&
-      Date.now() - this.modelCacheTimestamp < ZChatModelProvider.MODEL_CACHE_TTL_MS
-    ) {
+    if (this.fetchedModels !== null && Date.now() - this.modelCacheTimestamp < ZChatModelProvider.MODEL_CACHE_TTL_MS) {
       return this.fetchedModels;
     }
 

@@ -5,17 +5,19 @@ import {
   ChatResponseMarkdownPart,
   ChatResponseTurn,
   commands,
-  LanguageModelError,
   LanguageModelTextPart,
-  LanguageModelToolCallPart,
-  LanguageModelToolResultPart,
-  l10n,
   lm,
   MarkdownString,
   window,
   workspace,
 } from 'vscode';
 import { activate, deactivate } from './extension.js';
+import {
+  l10n,
+  LanguageModelError,
+  LanguageModelToolCallPart,
+  LanguageModelToolResultPart,
+} from './test/vscode.mock.js';
 
 vi.mock('./provider', () => ({
   ZChatModelProvider: vi.fn().mockImplementation(function () {
@@ -361,12 +363,9 @@ describe('extension', () => {
       (lmError as any).code = 'off_topic';
       const mockSendRequest = vi.fn().mockRejectedValue(lmError);
 
-      await handler(
-        { prompt: 'hi', model: { sendRequest: mockSendRequest } },
-        { history: [] },
-        mockStream,
-        { isCancellationRequested: false },
-      );
+      await handler({ prompt: 'hi', model: { sendRequest: mockSendRequest } }, { history: [] }, mockStream, {
+        isCancellationRequested: false,
+      });
 
       expect(l10n.t).toHaveBeenCalled();
       expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('off_topic'));
@@ -377,12 +376,9 @@ describe('extension', () => {
       const mockStream = { markdown: vi.fn() };
       const mockSendRequest = vi.fn().mockRejectedValue('plain-string-error');
 
-      await handler(
-        { prompt: 'hi', model: { sendRequest: mockSendRequest } },
-        { history: [] },
-        mockStream,
-        { isCancellationRequested: false },
-      );
+      await handler({ prompt: 'hi', model: { sendRequest: mockSendRequest } }, { history: [] }, mockStream, {
+        isCancellationRequested: false,
+      });
 
       expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('Unknown error'));
     });

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  LanguageModelChatMessageRole,
-  LanguageModelDataPart,
-  LanguageModelTextPart,
-  LanguageModelToolCallPart,
-  LanguageModelToolResultPart,
-  window,
+    LanguageModelChatMessageRole,
+    LanguageModelDataPart,
+    LanguageModelTextPart,
+    LanguageModelToolCallPart,
+    LanguageModelToolResultPart,
+    window,
 } from 'vscode';
 import { formatModelName, getChatModelInfo, toZRole, ZChatModelProvider } from './provider.js';
 
