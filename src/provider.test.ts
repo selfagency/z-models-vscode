@@ -650,6 +650,19 @@ describe('setApiKey', () => {
     const result = await provider.setApiKey();
     expect(result).toBe(shortApiKey);
   });
+
+  it('fires model-information change event after API key update', async () => {
+    const mockApiKey = 'test-api-key-1234567890';
+    vi.spyOn(window, 'showInputBox').mockResolvedValue(mockApiKey);
+    vi.spyOn(mockContext.secrets, 'store').mockResolvedValue(undefined);
+
+    const provider = new ZChatModelProvider(mockContext, undefined, false);
+    const listener = vi.fn();
+    provider.onDidChangeLanguageModelChatInformation(listener);
+
+    await provider.setApiKey();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Set API Key Edge Cases ──────────────────────────────────────────────
@@ -1222,6 +1235,16 @@ describe('Token Count Provision', () => {
     const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
     expect(tokenCount).toBe(0);
   });
+
+  it('ignores unknown message parts in token counting', async () => {
+    const message = {
+      role: LanguageModelChatMessageRole.User,
+      content: [{ unexpected: true }],
+      name: undefined,
+    };
+    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    expect(tokenCount).toBe(0);
+  });
 });
 
 // ── Clear Tool Call ID Mappings Edge Cases ────────────────────────────────
@@ -1258,6 +1281,30 @@ describe('Clear Tool Call ID Mappings Edge Cases', () => {
     const vsCodeId = provider.getOrCreateVsCodeToolCallId('z-id-1');
     expect(vsCodeId).toMatch(/^[a-zA-Z0-9]{9}$/);
     expect(provider.getZToolCallId(vsCodeId)).toBe('z-id-1');
+  });
+});
+
+describe('Provider dispose', () => {
+  it('cleans up tokenizer and model cache safely', async () => {
+    const provider = new ZChatModelProvider(mockContext, undefined, false);
+    await provider.provideTokenCount({} as any, 'hello world', {} as any);
+    (provider as any).fetchedModels = [
+      {
+        id: 'glm-5',
+        name: 'GLM 5',
+        maxInputTokens: 1,
+        maxOutputTokens: 1,
+        defaultCompletionTokens: 1,
+        toolCalling: false,
+        supportsParallelToolCalls: false,
+      },
+    ];
+
+    provider.dispose();
+
+    expect((provider as any).tokenizer).toBeNull();
+    expect((provider as any).fetchedModels).toBeNull();
+    expect((provider as any).client).toBeNull();
   });
 });
 

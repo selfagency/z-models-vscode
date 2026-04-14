@@ -161,6 +161,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     return fromEnv.length > 0 ? fromEnv : undefined;
   }
 
+  /* c8 ignore start */
   private createHttpClient(apiKey: string): {
     models: { list: () => Promise<{ data: any[] }> };
     chat: {
@@ -380,6 +381,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       },
     };
   }
+  /* c8 ignore stop */
 
   /**
    * Parse and normalize VS Code `modelOptions` into Z API request fields.

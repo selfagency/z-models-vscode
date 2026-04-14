@@ -189,6 +189,7 @@ export const Uri = {
 export const workspace = {
   getConfiguration: vi.fn().mockReturnValue({
     get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+    update: vi.fn().mockResolvedValue(undefined),
   }),
   onDidChangeConfiguration: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 };
@@ -198,3 +199,9 @@ export const chat = {
     .fn()
     .mockReturnValue({ iconPath: undefined, followupProvider: undefined, dispose: vi.fn() }),
 };
+
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
