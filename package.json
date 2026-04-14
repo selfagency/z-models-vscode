@@ -133,6 +133,7 @@
   },
   "dependencies": {
     "@selfagency/llm-stream-parser": "^0.1.5",
+    "dotenv": "^16.6.1",
     "ky": "2.0.1",
     "tiktoken": "^1.0.22"
   },

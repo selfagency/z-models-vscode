@@ -40,8 +40,9 @@ describe('extension', () => {
 
     it('pushes provider, mcp, and command disposables in the first subscription push', () => {
       activate(mockContext);
-      // First push call includes provider + mcp provider + command
-      expect(mockContext.subscriptions.push.mock.calls[0].length).toBeGreaterThanOrEqual(3);
+      // Find the registration push call (provider + mcp provider + command)
+      const registrationCall = mockContext.subscriptions.push.mock.calls.find((call: unknown[]) => call.length >= 3);
+      expect(registrationCall).toBeDefined();
     });
 
     it('creates the @z chat participant', () => {

@@ -1,4 +1,5 @@
 import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
+import { config as loadDotenv } from 'dotenv';
 import ky from 'ky';
 import { get_encoding, Tiktoken } from 'tiktoken';
 import {
@@ -22,7 +23,14 @@ import {
   window,
   workspace,
 } from 'vscode';
-import { createZhipu } from 'zhipu-ai-provider';
+
+// Optional local-dev convenience: load .env values when available.
+// Secret storage remains the primary source of truth.
+// For deterministic unit tests, this is disabled unless explicitly opted in.
+const allowEnvInTests = process.env.Z_MODELS_ALLOW_ENV_API_KEY_IN_TESTS === '1';
+if (!process.env.VITEST || allowEnvInTests) {
+  loadDotenv();
+}
 
 /**
  * MCP Server configuration
@@ -116,7 +124,6 @@ export type ZMessage =
  * Implements VS Code's LanguageModelChatProvider interface for GitHub Copilot Chat
  */
 export class ZChatModelProvider implements LanguageModelChatProvider {
-  private ai: any | null = null;
   private client: any | null = null;
   private tokenizer: Tiktoken | null = null;
   private fetchedModels: ZModel[] | null = null;
@@ -155,6 +162,104 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       // Fallback for tests or environments without workspace configuration support.
       return defaultBaseByMode.zaiCoding;
     }
+  }
+
+  private async getApiKeyFromSecretsOrEnv(): Promise<string | undefined> {
+    const fromSecrets = await this.context.secrets.get('Z_API_KEY');
+    if (fromSecrets && fromSecrets.trim().length > 0) {
+      return fromSecrets;
+    }
+
+    // Keep unit tests deterministic unless explicitly enabled.
+    if (process.env.VITEST && !allowEnvInTests) {
+      return undefined;
+    }
+
+    const fromEnv = (process.env.Z_API_KEY || process.env.ZHIPU_API_KEY || '').trim();
+    return fromEnv.length > 0 ? fromEnv : undefined;
+  }
+
+  private createHttpClient(apiKey: string): {
+    models: { list: () => Promise<{ data: any[] }> };
+    chat: {
+      stream: (payload: {
+        model: string;
+        messages: ZMessage[];
+        maxTokens: number;
+        tools?: Array<{ type: 'function'; function: { name: string; description?: string; parameters: unknown } }>;
+      }) => AsyncIterable<{ data: { choices: Array<{ delta: { content?: string } }> } }>;
+    };
+  } {
+    const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+
+    return {
+      models: {
+        list: async () => {
+          try {
+            const data = await ky
+              .get(`${baseUrl}/models`, {
+                headers,
+                retry: 0,
+              })
+              .json<any>();
+            return { data: Array.isArray(data?.data) ? data.data : [] };
+          } catch {
+            // Some endpoints don't expose model listing for this plan; fallback handled by caller.
+            return { data: [] };
+          }
+        },
+      },
+      chat: {
+        stream: async function* ({ model, messages, maxTokens, tools }) {
+          const response = await ky
+            .post(`${baseUrl}/chat/completions`, {
+              headers,
+              retry: 0,
+              json: {
+                model,
+                messages,
+                max_tokens: maxTokens,
+                tools,
+                stream: true,
+              },
+            })
+            .text();
+
+          // Best-effort SSE parsing. If response is not SSE, emit full body as one chunk.
+          if (!response.includes('data:')) {
+            yield { data: { choices: [{ delta: { content: response } }] } };
+            return;
+          }
+
+          const lines = response.split('\n');
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line.startsWith('data:')) {
+              continue;
+            }
+
+            const payload = line.slice('data:'.length).trim();
+            if (!payload || payload === '[DONE]') {
+              continue;
+            }
+
+            try {
+              const parsed = JSON.parse(payload) as any;
+              const content = parsed?.choices?.[0]?.delta?.content;
+              if (typeof content === 'string' && content.length > 0) {
+                yield { data: { choices: [{ delta: { content } }] } };
+              }
+            } catch {
+              // Ignore malformed SSE frames.
+            }
+          }
+        },
+      },
+    };
   }
 
   /**
@@ -263,21 +368,23 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       return this.fetchedModels;
     }
 
-    if (!this.ai && !this.client) {
+    if (!this.client) {
       return [];
     }
 
     try {
       let zModels: any[] = [];
+      let usedClientList = false;
 
       // Compatibility path: tests and advanced users can inject a custom client with models.list().
       if (this.client?.models?.list) {
+        usedClientList = true;
         const response = await this.client.models.list();
         zModels = Array.isArray(response?.data) ? response.data : [];
       }
 
       // Fallback curated set when API/model listing is unavailable.
-      if (!Array.isArray(zModels) || zModels.length === 0) {
+      if ((!Array.isArray(zModels) || zModels.length === 0) && !usedClientList) {
         zModels = [
           {
             id: 'glm-5.1',
@@ -288,6 +395,11 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             capabilities: { completionChat: true, functionCalling: true, vision: true },
           },
         ];
+      }
+
+      if (!Array.isArray(zModels) || zModels.length === 0) {
+        this.fetchedModels = [];
+        return this.fetchedModels;
       }
 
       const chatModels = zModels.filter(m => m?.capabilities?.completionChat !== false);
@@ -380,7 +492,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * @returns A promise that resolves to the entered API key if valid, or undefined if cancelled
    */
   public async setApiKey(): Promise<string | undefined> {
-    let apiKey: string | undefined = await this.context.secrets.get('Z_API_KEY');
+    let apiKey: string | undefined = await this.getApiKeyFromSecretsOrEnv();
     this.log.debug('[Z] Prompting user for API key (existing present: ' + !!apiKey + ')');
     apiKey = await window.showInputBox({
       placeHolder: 'Z API Key',
@@ -402,7 +514,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     if (!apiKey) {
       this.log.info('[Z] setApiKey canceled by user');
-      return undefined;
+      return await this.getApiKeyFromSecretsOrEnv();
     }
 
     this.log.info('[Z] Storing API key and initializing client');
@@ -412,26 +524,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     } catch (e) {
       this.log.warn('[Z] Failed to store API key in secret storage: ' + String(e));
     }
-    // Initialize Zhipu AI client
-    this.ai = createZhipu({
-      baseURL: this.getConfiguredBaseUrl(),
-      apiKey: apiKey,
-    });
-    this.client = {
-      models: {
-        list: async () => {
-          const data = await ky
-            .get(`${this.getConfiguredBaseUrl().replace(/\/$/, '')}/models`, {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-              },
-              retry: 0,
-            })
-            .json<any>();
-          return { data: Array.isArray((data as any)?.data) ? (data as any).data : [] };
-        },
-      },
-    };
+    this.client = this.createHttpClient(apiKey);
     this.fetchedModels = null;
 
     return apiKey;
@@ -443,34 +536,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * @returns Whether the initialization was successful
    */
   private async initClient(silent: boolean): Promise<boolean> {
-    if (this.ai) {
+    if (this.client) {
       return true;
     }
 
-    let apiKey: string | undefined = await this.context.secrets.get('Z_API_KEY');
+    let apiKey: string | undefined = await this.getApiKeyFromSecretsOrEnv();
     this.log.debug('[Z] initClient called (silent=' + silent + ', hasStoredKey=' + !!apiKey + ')');
     if (!silent && !apiKey) {
       apiKey = await this.setApiKey();
     } else if (apiKey) {
-      this.ai = createZhipu({
-        baseURL: this.getConfiguredBaseUrl(),
-        apiKey: apiKey,
-      });
-      this.client = {
-        models: {
-          list: async () => {
-            const data = await ky
-              .get(`${this.getConfiguredBaseUrl().replace(/\/$/, '')}/models`, {
-                headers: {
-                  Authorization: `Bearer ${apiKey}`,
-                },
-                retry: 0,
-              })
-              .json<any>();
-            return { data: Array.isArray((data as any)?.data) ? (data as any).data : [] };
-          },
-        },
-      };
+      this.client = this.createHttpClient(apiKey);
     }
 
     this.log.debug('[Z] initClient result: ' + !!apiKey);
@@ -521,7 +596,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.clearToolCallIdMappings();
 
     // Check if client is initialized
-    if (!this.ai && !this.client) {
+    if (!this.client) {
       progress.report(new LanguageModelTextPart('Please add your Z API key to use Z AI.'));
       return;
     }
@@ -570,60 +645,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const _safePrompt = typeof modelOptions.safePrompt === 'boolean' ? modelOptions.safePrompt : undefined;
 
     try {
-      if (this.client?.chat?.stream) {
-        const streamResult = await this.client.chat.stream({
-          model: model.id,
-          messages: _zMessages,
-          maxTokens: Math.min(foundModel.defaultCompletionTokens, foundModel.maxOutputTokens),
-          tools: zTools,
-        });
-
-        const streamProcessor = new LLMStreamProcessor({
-          parseThinkTags: true,
-          scrubContextTags: true,
-          enforcePrivacyTags: true,
-          onWarning: message => {
-            this.log.warn('[Z] stream parser: ' + message);
-          },
-        });
-
-        streamProcessor.on('thinking', delta => {
-          this.log.debug('[Z] thinking delta length: ' + (delta?.length ?? 0));
-        });
-
-        streamProcessor.on('text', delta => {
-          if (delta) {
-            this.log.debug('[Z] content delta: ' + delta.slice(0, 200));
-            progress.report(new LanguageModelTextPart(delta));
-          }
-        });
-
-        for await (const chunk of streamResult) {
-          const content = chunk?.data?.choices?.[0]?.delta?.content;
-          if (typeof content === 'string' && content.length > 0) {
-            streamProcessor.process({ content });
-          }
-        }
-
-        streamProcessor.flush();
-        return;
-      }
-
-      // Use Zhipu AI provider to generate chat completion
-      const result = await this.ai.chat({
+      const streamResult = await this.client.chat.stream({
         model: model.id,
-        messages: _zMessages as any,
+        messages: _zMessages,
         maxTokens: Math.min(foundModel.defaultCompletionTokens, foundModel.maxOutputTokens),
+        tools: zTools,
       });
 
-      // Process streaming response
-      // Tool call deltas often arrive in multiple chunks. Buffer them until we have valid JSON.
-      const _toolCallBuffers = new Map<string, { name?: string; argsText: string }>();
-      const _emittedToolCalls = new Set<string>();
-
-      // LLMStreamProcessor handles thinking tag extraction (<think>...</think>) and
-      // privacy scrubbing automatically. Text events stream clean content; thinking
-      // events are logged to the output channel so they don't pollute the chat UI.
       const streamProcessor = new LLMStreamProcessor({
         parseThinkTags: true,
         scrubContextTags: true,
@@ -634,7 +662,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       });
 
       streamProcessor.on('thinking', delta => {
-        // Avoid logging raw thinking content to prevent leaking sensitive context.
         this.log.debug('[Z] thinking delta length: ' + (delta?.length ?? 0));
       });
 
@@ -645,12 +672,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }
       });
 
-      // Process the response from Zhipu AI
-      if (result.content) {
-        streamProcessor.process({ content: result.content });
+      for await (const chunk of streamResult) {
+        const content = chunk?.data?.choices?.[0]?.delta?.content;
+        if (typeof content === 'string' && content.length > 0) {
+          streamProcessor.process({ content });
+        }
       }
 
-      // Flush any remaining text buffered in the stream processor
       streamProcessor.flush();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
