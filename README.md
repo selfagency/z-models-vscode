@@ -66,6 +66,37 @@ Type `@z` in any Copilot Chat input to direct the conversation to Z.ai. The part
 @z explain the architecture of this project
 ```
 
+### Advanced `modelOptions` support
+
+This provider supports the following `modelOptions` keys (used internally by VS Code model requests and useful for extension contributors):
+
+- `temperature: number`
+- `topP: number`
+- `safePrompt: boolean`
+
+Thinking controls:
+
+- `thinking: boolean` (`false` maps to `thinking.type = "disabled"`)
+- `thinkingType: "enabled" | "disabled"`
+- `clearThinking: boolean` (alias: `clear_thinking`)
+
+Structured output:
+
+- `jsonMode: boolean` (maps to `response_format: { type: "json_object" }`)
+- `responseFormat: "json_object" | { type: "json_object" }`
+
+Web search tool:
+
+- `webSearch: boolean | object` (alias: `web_search`)
+  - `true` enables default web search tool config
+  - object passes through as `web_search` tool configuration
+
+Notes:
+
+- Requests use streaming (`stream: true`) and tool streaming (`tool_stream: true`) when tools are present.
+- Tool calls are assembled incrementally from SSE deltas and emitted as soon as arguments become valid JSON.
+- Cache usage is automatic server-side; cached prompt token counts are logged when returned by the API (`usage.prompt_tokens_details.cached_tokens`).
+
 ## 🛡️ Privacy & Security
 
 - Your API key is stored securely using VS Code's encrypted secrets API
@@ -86,7 +117,7 @@ This extension supports Model Context Protocol (MCP) servers for enhanced capabi
 You can enable/disable MCP servers in VS Code settings:
 
 1. Open VS Code Settings (`Ctrl+,` or `Cmd+,`)
-2. Search for "Z Models"
+2. Search for "Z.ai"
 3. Enable/disable individual MCP servers as needed
 
 ## 🛠️ Development

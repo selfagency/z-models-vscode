@@ -13,11 +13,21 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.lm.registerLanguageModelChatProvider('z', provider),
-    vscode.lm.registerMcpServerDefinitionProvider('zModels.mcpServers', mcpServerDefinitionProvider),
     vscode.commands.registerCommand('z-chat.manageApiKey', async () => {
       await provider.setApiKey();
     }),
   );
+
+  // registerMcpServerDefinitionProvider is not available in all VS Code builds.
+  // Guard it so a missing API cannot crash activation and block command registration.
+  try {
+    context.subscriptions.push(
+      vscode.lm.registerMcpServerDefinitionProvider('zModels.mcpServers', mcpServerDefinitionProvider),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown MCP registration error';
+    logOutputChannel?.warn(`[Z] MCP registration unavailable in this VS Code build: ${message}`);
+  }
 
   if (logOutputChannel) {
     context.subscriptions.push(logOutputChannel);

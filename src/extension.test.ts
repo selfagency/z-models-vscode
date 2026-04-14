@@ -40,8 +40,8 @@ describe('extension', () => {
 
     it('pushes provider, mcp, and command disposables in the first subscription push', () => {
       activate(mockContext);
-      // Find the registration push call (provider + mcp provider + command)
-      const registrationCall = mockContext.subscriptions.push.mock.calls.find((call: unknown[]) => call.length >= 3);
+      // Provider and command are in the first push; MCP is a separate guarded push.
+      const registrationCall = mockContext.subscriptions.push.mock.calls.find((call: unknown[]) => call.length >= 2);
       expect(registrationCall).toBeDefined();
     });
 
