@@ -1,0 +1,167 @@
+{
+  "name": "z-models-vscode",
+  "displayName": "Z.ai for Copilot",
+  "version": "0.1.0",
+  "description": "Access Z.ai (Zhipu) models within GitHub Copilot Chat",
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "z",
+    "zai",
+    "z.ai",
+    "ai",
+    "copilot",
+    "chat",
+    "coding",
+    "code assistant"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/selfagency/z-models-vscode.git"
+  },
+  "license": "MIT",
+  "qna": "marketplace",
+  "author": {
+    "name": "Daniel Sieradski",
+    "email": "daniel@self.agency",
+    "url": "https://self.agency"
+  },
+  "publisher": "selfagency",
+  "main": "./dist/extension.js",
+  "scripts": {
+    "check-types": "tsgo --noEmit",
+    "compile": "pnpm run check-types && pnpm run lint && tsup",
+    "deploy": "vsce publish --no-dependencies",
+    "format": "oxfmt 'src/**/*.ts' --write",
+    "lint:fix": "oxlint src --fix",
+    "lint": "oxlint src",
+    "package": "pnpm run check-types && pnpm run lint && NODE_ENV=production tsup",
+    "prepare": "husky",
+    "release": "zx ./scripts/release.mjs",
+    "release:pre": "zx ./scripts/release.mjs --pre-release",
+    "test": "vitest run src",
+    "test:extension": "vscode-test test/integration",
+    "test:coverage": "vitest run --coverage",
+    "vscode:prepublish": "pnpm run package",
+    "watch:build": "tsup --watch",
+    "watch:tsc": "tsgo --noEmit --watch --project tsconfig.json",
+    "watch": "run-p watch:*"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "z-chat.manageApiKey",
+        "title": "Z: Manage API Key"
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "z",
+        "displayName": "Z AI",
+        "managementCommand": "z-chat.manageApiKey"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "z-models-vscode.z",
+        "name": "z",
+        "fullName": "Z AI",
+        "description": "Ask questions using Z AI models",
+        "isSticky": true
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "zModels.mcpServers",
+        "label": "Z Models MCP Servers"
+      }
+    ],
+    "configuration": {
+      "title": "Z Models",
+      "properties": {
+        "zModels.api.endpointMode": {
+          "type": "string",
+          "default": "zaiCoding",
+          "enum": [
+            "zaiCoding",
+            "zaiGeneral",
+            "bigmodel"
+          ],
+          "markdownDescription": "Which API endpoint preset to use for model chat requests. `zaiCoding` uses `https://api.z.ai/api/coding/paas/v4`, `zaiGeneral` uses `https://api.z.ai/api/paas/v4`, and `bigmodel` uses `https://open.bigmodel.cn/api/paas/v4`."
+        },
+        "zModels.api.baseUrlOverride": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom API base URL override. If set, this value is used instead of endpointMode presets."
+        },
+        "zModels.mcpServers.vision": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable vision MCP server"
+        },
+        "zModels.mcpServers.search": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable search MCP server"
+        },
+        "zModels.mcpServers.reader": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable reader MCP server"
+        },
+        "zModels.mcpServers.zread": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable zread MCP server"
+        }
+      }
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguageModelChatProvider:z",
+    "onChatParticipant:z-models-vscode.z",
+    "onMcpServerDefinitionProvider:zModels.mcpServers"
+  ],
+  "lint-staged": {
+    "src/**/*.ts": [
+      "oxlint --fix",
+      "oxfmt --write"
+    ]
+  },
+  "dependencies": {
+    "@selfagency/llm-stream-parser": "^0.1.5",
+    "ky": "2.0.1",
+    "tiktoken": "^1.0.22"
+  },
+  "devDependencies": {
+    "@octokit/rest": "^22.0.1",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.115.0",
+    "@typescript/native-preview": "7.0.0-dev.20260414.1",
+    "@vitest/coverage-v8": "^4.1.4",
+    "@vscode/dts": "^0.4.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "assert": "^2.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "npm-run-all": "^4.1.5",
+    "ora": "^9.3.0",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
+    "oxlint-tsgolint": "^0.21.0",
+    "tsup": "^8.5.1",
+    "typescript": "6.0.2",
+    "vitest": "^4.1.4",
+    "vscode": "^1.1.37",
+    "zx": "^8.8.5"
+  },
+  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "icon": "logo.png"
+}

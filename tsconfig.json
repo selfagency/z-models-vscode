@@ -1,0 +1,22 @@
+{
+	"include": [
+		"src/**/*.ts"
+	],
+	"compilerOptions": {
+		"module": "Preserve",
+		"moduleResolution": "bundler",
+		"target": "ES2024",
+		"lib": [
+			"ES2024"
+		],
+		"sourceMap": true,
+		"rootDir": "src",
+		"strict": true,
+		"outDir": "out",
+		"skipLibCheck": true,
+		"types": [
+			"node",
+			"vscode"
+		]
+	}
+}
