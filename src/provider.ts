@@ -11,6 +11,7 @@ import {
   LanguageModelChatMessage,
   LanguageModelChatProvider,
   LanguageModelDataPart,
+  LanguageModelError,
   LanguageModelResponsePart,
   LanguageModelTextPart,
   LanguageModelToolCallPart,
@@ -43,6 +44,17 @@ type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
+// Maximum characters per tool result to prevent context window overflow
+const MAX_TOOL_RESULT_CHARS = 20000;
+
+// Maximum number of tools per request
+const MAX_TOOLS_PER_REQUEST = 128;
+
+// Retry configuration for API requests
+const MAX_RETRIES = 10;
+const BASE_RETRY_DELAY_MS = 2000;
+const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
+
 const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutputTokens?: number }> = {
   'glm-4.6': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
@@ -56,6 +68,148 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
 function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
   const normalized = id.toLowerCase();
   return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
+}
+
+// ── Text-embedded tool call token parsing ──────────────────────────────────
+// Z.ai sometimes emits tool calls as text tokens like:
+//   <|tool_call_begin|>tool_name<|tool_call_argument_begin|>{"arg":"val"}<|tool_call_end|>
+// These must be parsed and emitted as LanguageModelToolCallPart instead of raw text.
+const TOOL_CALL_BEGIN = '<|tool_call_begin|>';
+const TOOL_CALL_ARG_BEGIN = '<|tool_call_argument_begin|>';
+const TOOL_CALL_END = '<|tool_call_end|>';
+
+/**
+ * Parse provider control tokens embedded in streamed text content and emit
+ * tool calls and visible text appropriately.
+ */
+function parseTextEmbeddedToolCalls(
+  input: string,
+  buffer: string,
+  active: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined,
+  emittedKeys: Set<string>,
+): {
+  visibleText: string;
+  newBuffer: string;
+  newActive: typeof active;
+  toolCalls: Array<{ name: string; arguments: string }>;
+} {
+  const toolCalls: Array<{ name: string; arguments: string }> = [];
+  let data = buffer + input;
+  let visibleOut = '';
+  let currentActive = active;
+
+  while (data.length > 0) {
+    if (!currentActive) {
+      const b = data.indexOf(TOOL_CALL_BEGIN);
+      if (b === -1) {
+        // Check for partial prefix at end
+        let longestPartialPrefix = 0;
+        for (let k = Math.min(TOOL_CALL_BEGIN.length - 1, data.length - 1); k > 0; k--) {
+          if (data.endsWith(TOOL_CALL_BEGIN.slice(0, k))) {
+            longestPartialPrefix = k;
+            break;
+          }
+        }
+        if (longestPartialPrefix > 0) {
+          visibleOut += stripControlTokens(data.slice(0, data.length - longestPartialPrefix));
+          data = '';
+          break;
+        }
+        visibleOut += stripControlTokens(data);
+        data = '';
+        break;
+      }
+
+      // Emit any text before the token
+      const pre = data.slice(0, b);
+      if (pre) visibleOut += stripControlTokens(pre);
+      data = data.slice(b + TOOL_CALL_BEGIN.length);
+
+      // Find the argument begin or end token
+      const a = data.indexOf(TOOL_CALL_ARG_BEGIN);
+      const e = data.indexOf(TOOL_CALL_END);
+      let delimIdx = -1;
+      let delimKind: 'arg' | 'end' | undefined;
+      if (a !== -1 && (e === -1 || a < e)) {
+        delimIdx = a;
+        delimKind = 'arg';
+      } else if (e !== -1) {
+        delimIdx = e;
+        delimKind = 'end';
+      } else {
+        // No delimiter yet — buffer the whole thing
+        data = TOOL_CALL_BEGIN + data;
+        break;
+      }
+
+      const header = data.slice(0, delimIdx).trim();
+      const m = header.match(/^([A-Za-z0-9_\-.]+)(?::(\d+))?/);
+      const name = m?.[1];
+      const index = m?.[2] ? Number(m[2]) : undefined;
+      currentActive = { name, index, argBuffer: '', emitted: false };
+
+      if (delimKind === 'arg') {
+        data = data.slice(delimIdx + TOOL_CALL_ARG_BEGIN.length);
+      } else {
+        data = data.slice(delimIdx + TOOL_CALL_END.length);
+        const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
+        if (!emittedKeys.has(key)) {
+          toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: '{}' });
+          emittedKeys.add(key);
+          currentActive.emitted = true;
+        }
+        currentActive = undefined;
+      }
+      continue;
+    }
+
+    // Active tool call — look for end token
+    const e2 = data.indexOf(TOOL_CALL_END);
+    if (e2 === -1) {
+      currentActive.argBuffer += data;
+      if (!currentActive.emitted) {
+        const parsed = tryParseJson(currentActive.argBuffer);
+        if (parsed) {
+          const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
+          if (!emittedKeys.has(key)) {
+            toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: currentActive.argBuffer });
+            emittedKeys.add(key);
+            currentActive.emitted = true;
+          }
+        }
+      }
+      data = '';
+      break;
+    }
+
+    currentActive.argBuffer += data.slice(0, e2);
+    data = data.slice(e2 + TOOL_CALL_END.length);
+    if (!currentActive.emitted) {
+      const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
+      if (!emittedKeys.has(key)) {
+        toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: currentActive.argBuffer || '{}' });
+        emittedKeys.add(key);
+      }
+    }
+    currentActive = undefined;
+  }
+
+  return { visibleText: visibleOut, newBuffer: data, newActive: currentActive, toolCalls };
+}
+
+function stripControlTokens(text: string): string {
+  return text
+    .replace(/<\|[a-zA-Z0-9_-]+_section_(?:begin|end)\|>/g, '')
+    .replace(/<\|tool_call_(?:argument_)?(?:begin|end)\|>/g, '');
+}
+
+function tryParseJson(text: string): Record<string, unknown> | undefined {
+  if (!text || !text.trim()) return undefined;
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -137,6 +291,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly log: LogOutputChannel;
   // Event emitter for notifying VS Code when models change
   private readonly _onDidChangeLanguageModelChatInformation = new EventEmitter<void>();
+  // Track token usage from API responses
+  private usageMetrics = { promptTokens: 0, completionTokens: 0 };
+  private usageReported = false;
+  // Text-embedded tool call parser state
+  private textToolBuffer = '';
+  private textToolActive: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined;
+  private emittedTextToolCallKeys = new Set<string>();
+  // User-Agent header for API requests
+  private readonly userAgent: string;
 
   private getConfiguredBaseUrl(): string {
     const defaultBaseByMode: Record<ApiEndpointMode, string> = {
@@ -157,6 +320,96 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     } catch {
       // Fallback for tests or environments without workspace configuration support.
       return defaultBaseByMode.zaiCoding;
+    }
+  }
+
+  /**
+   * Convert HTTP status codes to proper VS Code LanguageModelError subtypes.
+   */
+  private toLanguageModelError(status: number, statusText: string, details: string): Error {
+    const message = `Z.ai API error: ${status} ${statusText}${details ? `\n${details}` : ''}`;
+    if (status === 401 || status === 403) {
+      return LanguageModelError.NoPermissions(message);
+    }
+    if (status === 404) {
+      return LanguageModelError.NotFound(message);
+    }
+    if (status === 429) {
+      return LanguageModelError.Blocked(message);
+    }
+    return new Error(message);
+  }
+
+  /**
+   * Check if a model supports vision natively.
+   */
+  private modelSupportsVision(modelId: string): boolean {
+    if (this.fetchedModels) {
+      const found = this.fetchedModels.find(m => m.id === modelId);
+      return found?.supportsVision ?? false;
+    }
+    return /(?:4\.5v|4\.6v|5v|vision|vl)/i.test(modelId);
+  }
+
+  /**
+   * Pick a fallback vision model for image input.
+   */
+  private getVisionFallbackModelId(): string | undefined {
+    if (this.fetchedModels) {
+      const preferred = this.fetchedModels.find(m => m.id === 'glm-4.6v' && m.supportsVision);
+      if (preferred) return preferred.id;
+      return this.fetchedModels.find(m => m.supportsVision)?.id;
+    }
+    return 'glm-4.6v';
+  }
+
+  /**
+   * Check if any message contains image input parts.
+   */
+  private hasImageInput(messages: readonly LanguageModelChatMessage[]): boolean {
+    for (const msg of messages) {
+      for (const part of msg.content) {
+        if (part instanceof LanguageModelDataPart && part.mimeType?.startsWith('image/')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Truncate text to a maximum number of characters for tool results.
+   */
+  private static truncateText(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    const removed = text.length - maxChars;
+    return `${text.slice(0, maxChars)}\n...[truncated ${removed} chars]`;
+  }
+
+  /**
+   * Report token usage metrics to VS Code Chat UI via LanguageModelDataPart.
+   */
+  private reportUsageMetrics(progress: Progress<LanguageModelResponsePart>): void {
+    if (this.usageReported) return;
+    if (this.usageMetrics.promptTokens > 0 || this.usageMetrics.completionTokens > 0) {
+      const totalTokens = this.usageMetrics.promptTokens + this.usageMetrics.completionTokens;
+      this.log.info(`[Z] Token usage: prompt=${this.usageMetrics.promptTokens}, completion=${this.usageMetrics.completionTokens}, total=${totalTokens}`);
+      try {
+        progress.report(
+          LanguageModelDataPart.json(
+            {
+              type: 'usage',
+              prompt_tokens: this.usageMetrics.promptTokens,
+              completion_tokens: this.usageMetrics.completionTokens,
+              total_tokens: totalTokens,
+            },
+            'application/vnd.zai.usage+json',
+          ),
+        );
+      } catch {
+        // Best effort — progress may already be closed
+      }
+      this.usageReported = true;
     }
   }
 
@@ -213,14 +466,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     };
   } {
     const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
-    const headers = {
+    const headers: Record<string, string> = {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      'User-Agent': this.userAgent,
     };
 
     const retry = {
-      limit: 3,
-      statusCodes: [408, 413, 429, 500, 502, 503, 504],
+      limit: MAX_RETRIES,
+      statusCodes: RETRYABLE_STATUS_CODES,
       calculateDelay: ({ attemptCount, error, retryOptions }: any) => {
         if (attemptCount > retryOptions.limit) {
           return 0;
@@ -231,8 +485,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           return 0;
         }
 
-        const base = 300;
-        const cap = 3000;
+        const base = BASE_RETRY_DELAY_MS;
+        const cap = 60000;
         return Math.min(base * 2 ** (attemptCount - 1), cap);
       },
     };
@@ -475,6 +729,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     // When true, attempt interactive initialization on construction (activation).
     // Default is false to avoid prompting during unit tests which instantiate the provider.
     autoInit: boolean = false,
+    userAgent?: string,
   ) {
     // Accept an optional logOutputChannel to keep tests simple. Provide a no-op fallback when not available.
     if (logOutputChannel) {
@@ -491,6 +746,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         dispose: () => {},
       } as unknown as LogOutputChannel;
     }
+
+    this.userAgent = userAgent ?? `z-models-vscode/unknown`;
 
     // Load MCP server configuration from settings
     this.loadMCPConfig();
@@ -810,13 +1067,22 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     token: CancellationToken,
   ): Promise<void> {
     this.log.info(`[Z] provideLanguageModelChatResponse start for model=${model.id}, messages=${messages.length}`);
-    // Clear tool call ID mappings for this new request
+    // Clear tool call ID mappings and parser state for this new request
     this.clearToolCallIdMappings();
+    this.textToolBuffer = '';
+    this.textToolActive = undefined;
+    this.emittedTextToolCallKeys.clear();
+    this.usageMetrics = { promptTokens: 0, completionTokens: 0 };
+    this.usageReported = false;
 
     // Check if client is initialized
     if (!this.client) {
-      progress.report(new LanguageModelTextPart('Please add your Z.ai API key to use Z.ai for Copilot.'));
-      return;
+      throw LanguageModelError.NoPermissions('Please add your Z.ai API key to use Z.ai for Copilot.');
+    }
+
+    // Enforce maximum tools per request
+    if (options.tools && options.tools.length > MAX_TOOLS_PER_REQUEST) {
+      throw new Error(`Cannot have more than ${MAX_TOOLS_PER_REQUEST} tools per request.`);
     }
 
     // Find the model in our fetched list to get capability details
@@ -831,6 +1097,18 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       supportsParallelToolCalls: false,
       supportsVision: false,
     };
+
+    // Handle vision fallback: if messages contain images but the model doesn't support vision,
+    // switch to a vision model automatically.
+    let effectiveModelId = model.id;
+    const hasImages = this.hasImageInput(messages);
+    if (hasImages && !this.modelSupportsVision(model.id)) {
+      const visionFallback = this.getVisionFallbackModelId();
+      if (visionFallback && visionFallback !== model.id) {
+        this.log.warn(`[Z] Switching to vision model for image input: ${model.id} → ${visionFallback}`);
+        effectiveModelId = visionFallback;
+      }
+    }
 
     // Convert VS Code messages to Z format.
     // Important: a single VS Code message can include multiple tool results. Those must become
@@ -869,7 +1147,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     try {
       const streamResult = await this.client.chat.stream({
-        model: model.id,
+        model: effectiveModelId,
         messages: _zMessages,
         maxTokens: Math.min(foundModel.defaultCompletionTokens, foundModel.maxOutputTokens),
         temperature,
@@ -914,14 +1192,46 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
         const delta = chunk?.data?.choices?.[0]?.delta;
         const finishReason = chunk?.data?.choices?.[0]?.finish_reason;
-        const cachedTokens = chunk?.data?.usage?.prompt_tokens_details?.cached_tokens;
+
+        // Track usage metrics from streaming response
+        const usage = (chunk?.data as any)?.usage;
+        if (usage) {
+          if (typeof usage.prompt_tokens === 'number') this.usageMetrics.promptTokens = usage.prompt_tokens;
+          if (typeof usage.completion_tokens === 'number') this.usageMetrics.completionTokens = usage.completion_tokens;
+        }
+        const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
         if (typeof cachedTokens === 'number') {
           this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
         }
 
         const content = delta?.content;
         if (typeof content === 'string' && content.length > 0) {
-          streamProcessor.process({ content });
+          // Parse text-embedded tool call tokens before passing to stream processor
+          const { visibleText, newBuffer, newActive, toolCalls: embeddedCalls } = parseTextEmbeddedToolCalls(
+            content,
+            this.textToolBuffer,
+            this.textToolActive,
+            this.emittedTextToolCallKeys,
+          );
+          this.textToolBuffer = newBuffer;
+          this.textToolActive = newActive;
+
+          // Emit any visible text through the stream processor
+          if (visibleText.length > 0) {
+            streamProcessor.process({ content: visibleText });
+          }
+
+          // Emit any tool calls parsed from text-embedded tokens
+          for (const tc of embeddedCalls) {
+            try {
+              const parsed = JSON.parse(tc.arguments) as Record<string, unknown>;
+              const vsCodeId = this.getOrCreateVsCodeToolCallId(`text_${tc.name}_${Date.now()}`);
+              progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, parsed));
+              this.log.info(`[Z] text-embedded tool call: ${tc.name} (id=${vsCodeId})`);
+            } catch {
+              this.log.warn(`[Z] Skipping malformed text-embedded tool call for '${tc.name}'.`);
+            }
+          }
         }
 
         const reasoning = delta?.reasoning_content;
@@ -993,13 +1303,44 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           emittedToolCalls.add(tc.id);
         }
       }
+
+      // Flush any remaining text-embedded tool call
+      if (this.textToolActive && this.textToolActive.argBuffer) {
+        const parsed = tryParseJson(this.textToolActive.argBuffer);
+        if (parsed) {
+          const name = this.textToolActive.name ?? 'unknown_tool';
+          const vsCodeId = this.getOrCreateVsCodeToolCallId(`text_${name}_${Date.now()}`);
+          progress.report(new LanguageModelToolCallPart(vsCodeId, name, parsed));
+          this.log.info(`[Z] text-embedded tool call flushed: ${name} (id=${vsCodeId})`);
+        }
+      }
+
+      // Report usage metrics before finishing
+      this.reportUsageMetrics(progress);
     } catch (error) {
+      // Classify errors as LanguageModelError subtypes for better VS Code UX
+      if (
+        token.isCancellationRequested ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
+        throw new (LanguageModelError as any)('Request cancelled', 'cancelled');
+      }
+
+      // If the error already has an HTTP status, classify it
+      const httpStatus = (error as any)?.response?.statusCode ?? (error as any)?.statusCode;
+      if (typeof httpStatus === 'number' && httpStatus > 0) {
+        const errorBody = (error as any)?.response?.body ?? '';
+        throw this.toLanguageModelError(httpStatus, '', typeof errorBody === 'string' ? errorBody : String(errorBody));
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       this.log.error(
         '[Z] provideLanguageModelChatResponse error: ' +
           (error instanceof Error ? error.stack || error.message : String(error)),
       );
-      progress.report(new LanguageModelTextPart(`Error: ${errorMessage}`));
+      // Re-throw LanguageModelError as-is, wrap everything else
+      if (error instanceof LanguageModelError) throw error;
+      throw new Error(errorMessage);
     } finally {
       cancellationSubscription.dispose();
     }
@@ -1074,9 +1415,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             .filter(p => p instanceof LanguageModelTextPart)
             .map(p => (p as LanguageModelTextPart).value)
             .join('');
+          const truncatedResult = resultText && resultText.length > 0
+            ? ZChatModelProvider.truncateText(resultText, MAX_TOOL_RESULT_CHARS)
+            : ZChatModelProvider.truncateText(JSON.stringify(part.content), MAX_TOOL_RESULT_CHARS);
           toolResults.push({
             callId: zId,
-            content: resultText && resultText.length > 0 ? resultText : JSON.stringify(part.content),
+            content: truncatedResult,
           });
           continue;
         }

@@ -4,6 +4,15 @@ import { ZChatModelProvider } from './provider.js';
 
 let activeProvider: ZChatModelProvider | undefined;
 
+// Read extension version for User-Agent at module level
+let extVersion = 'unknown';
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  extVersion = require('../package.json').version ?? 'unknown';
+} catch {
+  // In test environments, package.json may not be resolvable
+}
+
 function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageModelChatMessage[] {
   const messages: vscode.LanguageModelChatMessage[] = [];
 
@@ -34,7 +43,8 @@ export function activate(context: vscode.ExtensionContext) {
   let provider: ZChatModelProvider | undefined;
   const getProvider = (): ZChatModelProvider => {
     if (!provider) {
-      provider = new ZChatModelProvider(context, logOutputChannel, true);
+      const ua = `z-models-vscode/${extVersion} VSCode/${vscode.version}`;
+      provider = new ZChatModelProvider(context, logOutputChannel, true, ua);
       activeProvider = provider;
     }
     return provider;

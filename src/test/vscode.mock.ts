@@ -99,6 +99,21 @@ export class LanguageModelError extends Error {
   ) {
     super(message);
   }
+
+  static NoPermissions(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'NoPermissions');
+    return err;
+  }
+
+  static NotFound(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'NotFound');
+    return err;
+  }
+
+  static Blocked(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'Blocked');
+    return err;
+  }
 }
 
 export const window = {
