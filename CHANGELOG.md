@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## What's Changed
+* feat: add Z.ai usage status bar item with auto-detected plan and quota polling
+* refactor: simplify usage status bar UX (right-side placement, hourly/weekly toggle, simplified tooltip)
+* fix: ensure 5-hour and weekly percentages use distinct quota windows
+
 ## [0.1.3] - 2026-04-14
 
 ## What's Changed

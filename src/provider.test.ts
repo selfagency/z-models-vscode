@@ -884,12 +884,8 @@ describe('Model Information Edge Cases', () => {
 // ── Chat Response Provision ───────────────────────────────────────────────
 
 describe('Chat Response Provision', () => {
-  it('should handle chat response with text', async () => {
-    const mockApiKey = 'test-api-key';
-    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue(mockApiKey);
-
+  it('should throw NoPermissions when API key is missing', async () => {
     const provider = new ZChatModelProvider(mockContext, undefined, false);
-    await provider['initClient'](true);
 
     const mockModel = {
       id: 'test-model',
@@ -917,15 +913,15 @@ describe('Chat Response Provision', () => {
       isCancellationRequested: false,
     };
 
-    await provider.provideLanguageModelChatResponse(
-      mockModel as any,
-      mockMessages as any,
-      {} as any,
-      mockProgress as any,
-      mockToken as any,
-    );
-
-    expect(mockProgress.report).toHaveBeenCalled();
+    await expect(
+      provider.provideLanguageModelChatResponse(
+        mockModel as any,
+        mockMessages as any,
+        {} as any,
+        mockProgress as any,
+        mockToken as any,
+      ),
+    ).rejects.toThrow('API key');
   });
 });
 
@@ -970,15 +966,15 @@ describe('Chat Response Edge Cases', () => {
       isCancellationRequested: true,
     };
 
-    await provider.provideLanguageModelChatResponse(
-      mockModel as any,
-      mockMessages as any,
-      {} as any,
-      mockProgress as any,
-      mockToken as any,
-    );
-
-    expect(mockProgress.report).toHaveBeenCalled();
+    await expect(
+      provider.provideLanguageModelChatResponse(
+        mockModel as any,
+        mockMessages as any,
+        {} as any,
+        mockProgress as any,
+        mockToken as any,
+      ),
+    ).rejects.toThrow('cancelled');
   });
 
   it('should handle error during chat response', async () => {
@@ -1020,15 +1016,15 @@ describe('Chat Response Edge Cases', () => {
       },
     };
 
-    await provider.provideLanguageModelChatResponse(
-      mockModel as any,
-      mockMessages as any,
-      {} as any,
-      mockProgress as any,
-      mockToken as any,
-    );
-
-    expect(mockProgress.report).toHaveBeenCalledWith(expect.objectContaining({ value: 'Error: Network error' }));
+    await expect(
+      provider.provideLanguageModelChatResponse(
+        mockModel as any,
+        mockMessages as any,
+        {} as any,
+        mockProgress as any,
+        mockToken as any,
+      ),
+    ).rejects.toThrow('Network error');
   });
 });
 

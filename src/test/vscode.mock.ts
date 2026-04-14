@@ -99,7 +99,34 @@ export class LanguageModelError extends Error {
   ) {
     super(message);
   }
+
+  static NoPermissions(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'NoPermissions');
+    return err;
+  }
+
+  static NotFound(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'NotFound');
+    return err;
+  }
+
+  static Blocked(message: string): LanguageModelError {
+    const err = new LanguageModelError(message, 'Blocked');
+    return err;
+  }
 }
+
+export const StatusBarAlignment = {
+  Left: 1,
+  Right: 2,
+} as const;
+
+export const QuickPickItemKind = {
+  Default: 0,
+  Separator: 1,
+} as const;
+
+export const ThemeColor = vi.fn().mockImplementation((id: string) => ({ id }));
 
 export const window = {
   showInputBox: vi.fn(),
@@ -112,6 +139,15 @@ export const window = {
     error: vi.fn(),
     appendLine: vi.fn(),
     dispose: vi.fn(),
+  }),
+  createStatusBarItem: vi.fn().mockReturnValue({
+    text: '',
+    tooltip: '',
+    command: undefined,
+    show: vi.fn(),
+    hide: vi.fn(),
+    dispose: vi.fn(),
+    backgroundColor: undefined,
   }),
 };
 
