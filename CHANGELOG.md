@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-14
+
+## What's Changed
+* fix: align Z API integration, streaming tool calls, and activation resilience by @selfagency in https://github.com/selfagency/z-models-vscode/pull/1
+
+## New Contributors
+* @selfagency made their first contribution in https://github.com/selfagency/z-models-vscode/pull/1
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.0...v0.1.1
+
+_Source: changes from v0.1.0 to v0.1.1._
+
+
 ## [0.1.0] - 2026-04-14
 
 **Full Changelog**: https://github.com/selfagency/z-models-vscode/commits/v0.1.0
