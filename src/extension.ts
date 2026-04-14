@@ -3,27 +3,59 @@ import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.j
 import { ZChatModelProvider } from './provider.js';
 
 export function activate(context: vscode.ExtensionContext) {
-  const logOutputChannel =
-    typeof vscode.window.createOutputChannel === 'function'
-      ? vscode.window.createOutputChannel('Z Models', { log: true })
-      : undefined;
+  let logOutputChannel: vscode.LogOutputChannel | undefined;
+  try {
+    logOutputChannel =
+      typeof vscode.window.createOutputChannel === 'function'
+        ? (vscode.window.createOutputChannel('Z Models', { log: true }) as vscode.LogOutputChannel)
+        : undefined;
+  } catch {
+    // Older VS Code builds may not support the options object overload.
+    logOutputChannel = undefined;
+  }
 
-  const provider = new ZChatModelProvider(context, logOutputChannel as any, true);
-  const mcpServerDefinitionProvider = new ZMcpServerDefinitionProvider(context);
+  let provider: ZChatModelProvider | undefined;
+  const getProvider = (): ZChatModelProvider => {
+    if (!provider) {
+      provider = new ZChatModelProvider(context, logOutputChannel as any, true);
+    }
+    return provider;
+  };
 
-  context.subscriptions.push(
-    vscode.lm.registerLanguageModelChatProvider('z', provider),
-    vscode.commands.registerCommand('z-chat.manageApiKey', async () => {
-      await provider.setApiKey();
-    }),
-  );
-
-  // registerMcpServerDefinitionProvider is not available in all VS Code builds.
-  // Guard it so a missing API cannot crash activation and block command registration.
+  // Register the API-key command first so users can recover even if model/MCP APIs fail.
   try {
     context.subscriptions.push(
-      vscode.lm.registerMcpServerDefinitionProvider('zModels.mcpServers', mcpServerDefinitionProvider),
+      vscode.commands.registerCommand('z-chat.manageApiKey', async () => {
+        await getProvider().setApiKey();
+      }),
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown command registration error';
+    logOutputChannel?.error(`[Z] Failed to register manageApiKey command: ${message}`);
+  }
+
+  // Register language model provider (guarded to avoid breaking command registration).
+  try {
+    if (vscode.lm?.registerLanguageModelChatProvider) {
+      context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('z', getProvider()));
+    } else {
+      logOutputChannel?.warn('[Z] Language model chat provider API is unavailable in this VS Code build.');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown model provider registration error';
+    logOutputChannel?.error(`[Z] Failed to register language model provider: ${message}`);
+  }
+
+  // Register MCP provider independently (guarded).
+  try {
+    if (vscode.lm?.registerMcpServerDefinitionProvider) {
+      const mcpServerDefinitionProvider = new ZMcpServerDefinitionProvider(context);
+      context.subscriptions.push(
+        vscode.lm.registerMcpServerDefinitionProvider('zModels.mcpServers', mcpServerDefinitionProvider),
+      );
+    } else {
+      logOutputChannel?.warn('[Z] MCP server definition provider API is unavailable in this VS Code build.');
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown MCP registration error';
     logOutputChannel?.warn(`[Z] MCP registration unavailable in this VS Code build: ${message}`);

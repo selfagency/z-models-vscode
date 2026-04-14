@@ -124,6 +124,7 @@
   },
   "activationEvents": [
     "onStartupFinished",
+    "onCommand:z-chat.manageApiKey",
     "onLanguageModelChatProvider:z",
     "onChatParticipant:z-models-vscode.z",
     "onMcpServerDefinitionProvider:zModels.mcpServers"
