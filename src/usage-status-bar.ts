@@ -85,22 +85,16 @@ export class UsageStatusBar implements vscode.Disposable {
 
   private pickHourlyQuota(usage: UsageData) {
     // Prefer explicit hour-based windows (unit=3), then choose the smallest hour window.
-    const hourly = usage.tokenQuotas
-      .filter(q => q.unit === 3)
-      .sort((a, b) => a.number - b.number);
+    const hourly = usage.tokenQuotas.filter(q => q.unit === 3).sort((a, b) => a.number - b.number);
     if (hourly.length > 0) return hourly[0];
 
     // Fallback: keep prior behavior for unexpected payloads.
-    return usage.tokenQuotas
-      .slice()
-      .sort((a, b) => a.unit * a.number - b.unit * b.number)[0];
+    return usage.tokenQuotas.slice().sort((a, b) => a.unit * a.number - b.unit * b.number)[0];
   }
 
   private pickWeeklyQuota(usage: UsageData) {
     // Prefer explicit week-based windows (unit=6), then choose the smallest week window.
-    const weekly = usage.tokenQuotas
-      .filter(q => q.unit === 6)
-      .sort((a, b) => a.number - b.number);
+    const weekly = usage.tokenQuotas.filter(q => q.unit === 6).sort((a, b) => a.number - b.number);
     if (weekly.length > 0) return weekly[0];
 
     // Fallback: if no weekly data exists, reuse hourly quota.
@@ -140,11 +134,10 @@ export class UsageStatusBar implements vscode.Disposable {
   private progressBar(pct: number, width: number): string {
     const safeWidth = Math.max(1, width);
     const clampedPct = Math.max(0, Math.min(100, pct));
-    const markerPos = Math.round((clampedPct / 100) * safeWidth);
-    const left = '-'.repeat(Math.max(0, markerPos));
-    const right = '-'.repeat(Math.max(0, safeWidth - markerPos));
-    // Constant-length gauge: same number of '-' and one '|', regardless of percentage.
-    return `[${left}|${right}]`;
+    const filled = Math.round((clampedPct / 100) * safeWidth);
+    const unfilled = Math.max(0, safeWidth - filled);
+    // Constant-length gauge using block-style chars.
+    return `${'█'.repeat(filled)}${'▒'.repeat(unfilled)}`;
   }
 
   private fmtReset(ms: number): string {
@@ -153,7 +146,10 @@ export class UsageStatusBar implements vscode.Disposable {
     const mins = Math.floor(diffMs / 60000);
     if (mins < 60) return `in ${mins}m`;
     const hrs = Math.floor(mins / 60);
-    return `in ${hrs}h ${mins % 60}m`;
+    if (hrs < 24) return `in ${hrs}h ${mins % 60}m`;
+    const days = Math.floor(hrs / 24);
+    const remHrs = hrs % 24;
+    return remHrs > 0 ? `in ${days}d ${remHrs}h` : `in ${days}d`;
   }
 
   private fmtRelative(date: Date): string {
