@@ -43,6 +43,21 @@ type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
+const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutputTokens?: number }> = {
+  'glm-4.6': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-5': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-5.1': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-4.6v': { maxInputTokens: 128_000 },
+};
+
+function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
+  const normalized = id.toLowerCase();
+  return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
+}
+
 /**
  * Message types for Z API
  */
@@ -598,9 +613,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         id: m.id,
         originalName: m.name ?? formatModelName(m.id),
         detail: m.detail ?? m.description ?? undefined,
-        maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? 32768,
-        maxOutputTokens: m.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-        defaultCompletionTokens: m.defaultCompletionTokens ?? DEFAULT_COMPLETION_TOKENS,
+        maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? getKnownTokenLimits(m.id).maxInputTokens ?? 32768,
+        maxOutputTokens: m.maxOutputTokens ?? getKnownTokenLimits(m.id).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        defaultCompletionTokens:
+          m.defaultCompletionTokens ?? getKnownTokenLimits(m.id).maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
         toolCalling: resolveModelCapabilities(m).functionCalling,
         supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
         supportsVision: resolveModelCapabilities(m).vision,
