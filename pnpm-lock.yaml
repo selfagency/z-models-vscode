@@ -11,9 +11,6 @@ importers:
       '@selfagency/llm-stream-parser':
         specifier: ^0.1.5
         version: 0.1.5
-      dotenv:
-        specifier: 17.4.2
-        version: 17.4.2
       got:
         specifier: ^15.0.2
         version: 15.0.2
@@ -28,8 +25,8 @@ importers:
         specifier: ^25.6.0
         version: 25.6.0
       '@types/vscode':
-        specifier: ^1.109.0
-        version: 1.115.0
+        specifier: 1.109.0
+        version: 1.109.0
       '@typescript/native-preview':
         specifier: 7.0.0-dev.20260414.1
         version: 7.0.0-dev.20260414.1
@@ -794,8 +791,8 @@ packages:
   '@types/node@25.6.0':
     resolution: {integrity: sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==}
 
-  '@types/vscode@1.115.0':
-    resolution: {integrity: sha512-/M8cdznOlqtMqduHKKlIF00v4eum4ZWKgn8YoPRKcN6PDdvoWeeqDaQSnw63ipDbq1Uzz78Wndk/d0uSPwORfA==}
+  '@types/vscode@1.109.0':
+    resolution: {integrity: sha512-0Pf95rnwEIwDbmXGC08r0B4TQhAbsHQ5UyTIgVgoieDe4cOnf92usuR5dEczb6bTKEp7ziZH4TV1TRGPPCExtw==}
 
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260414.1':
     resolution: {integrity: sha512-O7h9lNcE9YMA2TKw1YX9GZO3K/Kb1FUmxjEJAfBFvjQhGydIk4oNsuoOQ3RQHVvebCdFjNroZzoIXNeR3ceCdA==}
@@ -1205,10 +1202,6 @@ packages:
   diff@7.0.0:
     resolution: {integrity: sha512-PJWHUb1RFevKCwaFA9RlG5tCd+FO5iRh9A8HEtkmBH2Li03iJriB6m6JIN4rGz3K3JLawI7/veA1xzRKP6ISBw==}
     engines: {node: '>=0.3.1'}
-
-  dotenv@17.4.2:
-    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
-    engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -3056,7 +3049,7 @@ snapshots:
     dependencies:
       undici-types: 7.19.2
 
-  '@types/vscode@1.115.0': {}
+  '@types/vscode@1.109.0': {}
 
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260414.1':
     optional: true
@@ -3488,8 +3481,6 @@ snapshots:
   diff@3.5.0: {}
 
   diff@7.0.0: {}
-
-  dotenv@17.4.2: {}
 
   dunder-proto@1.0.1:
     dependencies:

@@ -57,13 +57,43 @@
         "name": "z",
         "fullName": "Z.ai",
         "description": "Ask questions using Z.ai models",
-        "isSticky": true
+        "when": "zModels.hasApiKey",
+        "isSticky": true,
+        "disambiguation": [
+          {
+            "category": "Z.ai",
+            "description": "Coding, reasoning, and agent tasks using GLM models",
+            "examples": [
+              "explain this TypeScript error",
+              "refactor this function safely",
+              "help me debug this failing test"
+            ]
+          }
+        ],
+        "commands": [
+          {
+            "name": "model",
+            "description": "Show how to switch Z.ai models"
+          },
+          {
+            "name": "vision",
+            "description": "Use image/vision workflows"
+          },
+          {
+            "name": "clear",
+            "description": "Start a new clean chat thread"
+          }
+        ]
       }
     ],
     "commands": [
       {
         "command": "z-chat.manageApiKey",
         "title": "Z: Manage API Key"
+      },
+      {
+        "command": "z-chat.manageSettings",
+        "title": "Z: Manage Settings"
       }
     ],
     "configuration": {
@@ -123,8 +153,6 @@
     ]
   },
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:z-chat.manageApiKey",
     "onLanguageModelChatProvider:z",
     "onChatParticipant:z-models-vscode.z",
     "onMcpServerDefinitionProvider:zModels.mcpServers"
@@ -137,14 +165,13 @@
   },
   "dependencies": {
     "@selfagency/llm-stream-parser": "^0.1.5",
-    "dotenv": "17.4.2",
     "got": "^15.0.2",
     "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "@octokit/rest": "^22.0.1",
     "@types/node": "^25.6.0",
-    "@types/vscode": "^1.109.0",
+    "@types/vscode": "1.109.0",
     "@typescript/native-preview": "7.0.0-dev.20260414.1",
     "@vitest/coverage-v8": "^4.1.4",
     "@vscode/dts": "^0.4.1",

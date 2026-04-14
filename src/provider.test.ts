@@ -55,7 +55,8 @@ describe('getChatModelInfo', () => {
     const info = getChatModelInfo(base);
     expect(info.id).toBe('z-large-latest');
     expect(info.name).toBe('Z Large');
-    expect(info.family).toBe('z');
+    expect(info.family).toBe('z-large');
+    expect(info.version).toBe('z-large-latest');
     expect(info.maxInputTokens).toBe(128000);
     expect(info.maxOutputTokens).toBe(16384);
     expect(info.capabilities?.toolCalling).toBe(true);
@@ -191,6 +192,26 @@ describe('ZChatModelProvider — tool call ID mapping', () => {
       const after = provider.getOrCreateVsCodeToolCallId('z-refresh');
       expect(after).toMatch(/^[a-zA-Z0-9]{9}$/);
       expect(provider.getZToolCallId(before)).toBeUndefined();
+    });
+
+    it('handles many mappings without losing round-trip consistency', () => {
+      const pairs: Array<{ z: string; vs: string }> = [];
+      for (let i = 0; i < 200; i++) {
+        const z = `z-${i}`;
+        const vs = provider.getOrCreateVsCodeToolCallId(z);
+        pairs.push({ z, vs });
+      }
+
+      for (const pair of pairs) {
+        expect(provider.getZToolCallId(pair.vs)).toBe(pair.z);
+      }
+    });
+
+    it('keeps same VS Code id when repeated z id is requested many times', () => {
+      const first = provider.getOrCreateVsCodeToolCallId('z-collision');
+      for (let i = 0; i < 50; i++) {
+        expect(provider.getOrCreateVsCodeToolCallId('z-collision')).toBe(first);
+      }
     });
   });
 });
@@ -628,6 +649,19 @@ describe('setApiKey', () => {
     const provider = new ZChatModelProvider(mockContext, undefined, false);
     const result = await provider.setApiKey();
     expect(result).toBe(shortApiKey);
+  });
+
+  it('fires model-information change event after API key update', async () => {
+    const mockApiKey = 'test-api-key-1234567890';
+    vi.spyOn(window, 'showInputBox').mockResolvedValue(mockApiKey);
+    vi.spyOn(mockContext.secrets, 'store').mockResolvedValue(undefined);
+
+    const provider = new ZChatModelProvider(mockContext, undefined, false);
+    const listener = vi.fn();
+    provider.onDidChangeLanguageModelChatInformation(listener);
+
+    await provider.setApiKey();
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1156,6 +1190,16 @@ describe('Token Count Provision', () => {
     expect(tokenCount).toBeGreaterThan(0);
   });
 
+  it('should count tokens for a message with string content', async () => {
+    const message = {
+      role: LanguageModelChatMessageRole.User,
+      content: 'Hello, world!',
+      name: undefined,
+    };
+    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    expect(tokenCount).toBeGreaterThan(0);
+  });
+
   it('should count tokens for a message with tool calls', async () => {
     const message = {
       role: LanguageModelChatMessageRole.Assistant,
@@ -1191,6 +1235,16 @@ describe('Token Count Provision', () => {
     const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
     expect(tokenCount).toBe(0);
   });
+
+  it('ignores unknown message parts in token counting', async () => {
+    const message = {
+      role: LanguageModelChatMessageRole.User,
+      content: [{ unexpected: true }],
+      name: undefined,
+    };
+    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    expect(tokenCount).toBe(0);
+  });
 });
 
 // ── Clear Tool Call ID Mappings Edge Cases ────────────────────────────────
@@ -1213,7 +1267,7 @@ describe('Clear Tool Call ID Mappings Edge Cases', () => {
   });
 
   it('should allow new mappings after clearing', () => {
-    const vsCodeId1 = provider.getOrCreateVsCodeToolCallId('z-id-1');
+    const _vsCodeId1 = provider.getOrCreateVsCodeToolCallId('z-id-1');
     provider.clearToolCallIdMappings();
 
     const vsCodeId2 = provider.getOrCreateVsCodeToolCallId('z-id-1');
@@ -1227,6 +1281,30 @@ describe('Clear Tool Call ID Mappings Edge Cases', () => {
     const vsCodeId = provider.getOrCreateVsCodeToolCallId('z-id-1');
     expect(vsCodeId).toMatch(/^[a-zA-Z0-9]{9}$/);
     expect(provider.getZToolCallId(vsCodeId)).toBe('z-id-1');
+  });
+});
+
+describe('Provider dispose', () => {
+  it('cleans up tokenizer and model cache safely', async () => {
+    const provider = new ZChatModelProvider(mockContext, undefined, false);
+    await provider.provideTokenCount({} as any, 'hello world', {} as any);
+    (provider as any).fetchedModels = [
+      {
+        id: 'glm-5',
+        name: 'GLM 5',
+        maxInputTokens: 1,
+        maxOutputTokens: 1,
+        defaultCompletionTokens: 1,
+        toolCalling: false,
+        supportsParallelToolCalls: false,
+      },
+    ];
+
+    provider.dispose();
+
+    expect((provider as any).tokenizer).toBeNull();
+    expect((provider as any).fetchedModels).toBeNull();
+    expect((provider as any).client).toBeNull();
   });
 });
 

@@ -91,8 +91,28 @@ export class LanguageModelDataPart {
   ) {}
 }
 
+export class LanguageModelError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+  }
+}
+
 export const window = {
   showInputBox: vi.fn(),
+  showQuickPick: vi.fn(),
+  showInformationMessage: vi.fn(),
+  createOutputChannel: vi.fn().mockReturnValue({
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    appendLine: vi.fn(),
+    dispose: vi.fn(),
+  }),
 };
 
 export const lm = {
@@ -104,13 +124,31 @@ export class McpHttpServerDefinition {
   constructor(
     public readonly label: string,
     public readonly uri: any,
-    public readonly headers: Record<string, string> = {},
+    public headers: Record<string, string> = {},
+    public readonly version?: string,
+  ) {}
+}
+
+export class McpStdioServerDefinition {
+  constructor(
+    public readonly label: string,
+    public readonly command: string,
+    public readonly args: string[] = [],
+    public env: Record<string, string | number | null> = {},
     public readonly version?: string,
   ) {}
 }
 
 export const commands = {
   registerCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+  executeCommand: vi.fn(),
+};
+
+export const l10n = {
+  t: vi.fn((template: string, ...args: unknown[]) => {
+    if (args.length === 0) return template;
+    return template.replace(/\{(\d+)\}/g, (_, idx) => String(args[Number(idx)] ?? ''));
+  }),
 };
 
 export class MarkdownString {
@@ -151,10 +189,19 @@ export const Uri = {
 export const workspace = {
   getConfiguration: vi.fn().mockReturnValue({
     get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+    update: vi.fn().mockResolvedValue(undefined),
   }),
   onDidChangeConfiguration: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 };
 
 export const chat = {
-  createChatParticipant: vi.fn().mockReturnValue({ iconPath: undefined, dispose: vi.fn() }),
+  createChatParticipant: vi
+    .fn()
+    .mockReturnValue({ iconPath: undefined, followupProvider: undefined, dispose: vi.fn() }),
 };
+
+export const ConfigurationTarget = {
+  Global: 1,
+  Workspace: 2,
+  WorkspaceFolder: 3,
+} as const;
