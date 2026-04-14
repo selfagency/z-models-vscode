@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-14
+
+## What's Changed
+* feat: complete remediation plan implementation and validation by @selfagency in https://github.com/selfagency/z-models-vscode/pull/2
+
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.1...v0.1.2
+
+_Source: changes from v0.1.1 to v0.1.2._
+
+
 ## [0.1.1] - 2026-04-14
 
 ## What's Changed
