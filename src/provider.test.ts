@@ -282,6 +282,8 @@ describe('ZChatModelProvider — fetchModels', () => {
     expect(model.toolCalling).toBe(true);
     expect(model.supportsParallelToolCalls).toBe(true);
     expect(model.supportsVision).toBe(false);
+    expect(model.maxInputTokens).toBe(200000);
+    expect(model.maxOutputTokens).toBe(128000);
   });
 
   it('infers vision support for vision-flavored model ids when metadata is missing', async () => {
@@ -294,6 +296,17 @@ describe('ZChatModelProvider — fetchModels', () => {
     expect(model.id).toBe('glm-4.5v');
     expect(model.toolCalling).toBe(true);
     expect(model.supportsVision).toBe(true);
+  });
+
+  it('uses documented 128k context fallback for glm-4.6v bare ids', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-4.6v', object: 'model', created: 1, owned_by: 'z-ai' }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.id).toBe('glm-4.6v');
+    expect(model.maxInputTokens).toBe(128000);
   });
 
   it('falls back to formatModelName when name is null', async () => {
