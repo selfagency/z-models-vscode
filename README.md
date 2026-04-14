@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://z.ai">🌐 Z.ai</a> •
-  <a href="https://docs.z.ai/api">📖 API Docs</a> •
+  <a href="https://docs.z.ai/api-reference">📖 API Docs</a> •
   <a href="https://z.ai/manage-apikey/apikey-list">🔑 Get API Key</a>
 </p>
 
