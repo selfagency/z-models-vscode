@@ -67,6 +67,31 @@ Type `@z` in any Copilot Chat input to direct the conversation to Z.ai. The part
 @z explain the architecture of this project
 ```
 
+### Usage Status Bar
+
+When a `Z_API_KEY` is configured, the extension shows a usage item on the **right side** of the status bar.
+
+- Hourly view: `$(graph) Z · {num}% of 5 Hours`
+- Weekly view: `$(graph) Z · {num}% of Week`
+
+Click the status bar item to toggle between hourly and weekly views.
+
+Tooltip includes:
+
+- `Z.ai {Plan} plan` (auto-detected from Z.ai quota API)
+- Token quota windows and progress bars
+- MCP time-limit usage windows
+- Last updated time
+
+You can also refresh usage manually via command palette:
+
+- `Z: Refresh Usage Stats`
+
+Related settings:
+
+- `zModels.usage.enabled`
+- `zModels.usage.refreshInterval`
+
 ### Advanced `modelOptions` support
 
 This provider supports the following `modelOptions` keys (used internally by VS Code model requests and useful for extension contributors):
