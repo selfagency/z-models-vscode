@@ -40,6 +40,12 @@ export interface MCPServerConfig {
 
 type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
 
+const DEFAULT_BASE_BY_MODE: Record<ApiEndpointMode, string> = {
+  zaiCoding: 'https://api.z.ai/api/coding/paas/v4',
+  zaiGeneral: 'https://api.z.ai/api/paas/v4',
+  bigmodel: 'https://open.bigmodel.cn/api/paas/v4',
+};
+
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
@@ -294,6 +300,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   // Track token usage from API responses
   private usageMetrics = { promptTokens: 0, completionTokens: 0 };
   private usageReported = false;
+  private apiKeyForDiscovery?: string;
   // Text-embedded tool call parser state
   private textToolBuffer = '';
   private textToolActive: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined;
@@ -302,12 +309,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly userAgent: string;
 
   private getConfiguredBaseUrl(): string {
-    const defaultBaseByMode: Record<ApiEndpointMode, string> = {
-      zaiCoding: 'https://api.z.ai/api/coding/paas/v4',
-      zaiGeneral: 'https://api.z.ai/api/paas/v4',
-      bigmodel: 'https://open.bigmodel.cn/api/paas/v4',
-    };
-
     try {
       const config = workspace.getConfiguration('zModels');
       const override = (config.get<string>('api.baseUrlOverride', '') || '').trim();
@@ -316,11 +317,86 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
 
       const mode = config.get<ApiEndpointMode>('api.endpointMode', 'zaiCoding');
-      return defaultBaseByMode[mode] ?? defaultBaseByMode.zaiCoding;
+      return DEFAULT_BASE_BY_MODE[mode] ?? DEFAULT_BASE_BY_MODE.zaiCoding;
     } catch {
       // Fallback for tests or environments without workspace configuration support.
-      return defaultBaseByMode.zaiCoding;
+      return DEFAULT_BASE_BY_MODE.zaiCoding;
     }
+  }
+
+  private hasBaseUrlOverride(): boolean {
+    try {
+      const config = workspace.getConfiguration('zModels');
+      const override = (config.get<string>('api.baseUrlOverride', '') || '').trim();
+      return override.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async fetchModelsAcrossDefaultEndpoints(apiKey: string): Promise<any[]> {
+    const configured = this.getConfiguredBaseUrl().replace(/\/$/, '');
+    const baseUrls = [
+      configured,
+      DEFAULT_BASE_BY_MODE.zaiCoding,
+      DEFAULT_BASE_BY_MODE.zaiGeneral,
+      DEFAULT_BASE_BY_MODE.bigmodel,
+    ].map(url => url.replace(/\/$/, ''));
+
+    const uniqueBaseUrls = [...new Set(baseUrls)];
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'User-Agent': this.userAgent,
+    };
+
+    const retry = {
+      limit: 1,
+      statusCodes: RETRYABLE_STATUS_CODES,
+    };
+
+    const responses = await Promise.all(
+      uniqueBaseUrls.map(async baseUrl => {
+        try {
+          const data = await got
+            .get(`${baseUrl}/models`, {
+              headers,
+              retry,
+            })
+            .json<any>();
+          const models = Array.isArray(data?.data) ? data.data : [];
+          this.log.info(`[Z] model discovery from ${baseUrl}: ${models.length} model(s)`);
+          return models;
+        } catch (error) {
+          this.log.debug(`[Z] model discovery unavailable at ${baseUrl}: ${String(error)}`);
+          return [];
+        }
+      }),
+    );
+
+    const merged = new Map<string, any>();
+    for (const set of responses) {
+      for (const model of set) {
+        const id = typeof model?.id === 'string' ? model.id : undefined;
+        if (!id) continue;
+        if (!merged.has(id)) {
+          merged.set(id, model);
+          continue;
+        }
+        const existing = merged.get(id);
+        merged.set(id, {
+          ...existing,
+          ...model,
+          capabilities: {
+            ...(existing?.capabilities ?? {}),
+            ...(model?.capabilities ?? {}),
+          },
+        });
+      }
+    }
+
+    return [...merged.values()];
   }
 
   /**
@@ -348,7 +424,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const found = this.fetchedModels.find(m => m.id === modelId);
       return found?.supportsVision ?? false;
     }
-    return /(?:4\.5v|4\.6v|5v|vision|vl)/i.test(modelId);
+    return /(?:\d+(?:\.\d+)?v(?:-|$)|5v(?:-|$)|vision|vl|-ocr)/i.test(modelId);
   }
 
   /**
@@ -842,6 +918,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         usedClientList = true;
         const response = await this.client.models.list();
         zModels = Array.isArray(response?.data) ? response.data : [];
+
+        if (this.apiKeyForDiscovery && !this.hasBaseUrlOverride()) {
+          const merged = await this.fetchModelsAcrossDefaultEndpoints(this.apiKeyForDiscovery);
+          if (merged.length > 0) {
+            zModels = merged;
+          }
+        }
       }
 
       // Fallback curated set when API/model listing is unavailable.
@@ -962,6 +1045,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       this.log.warn('[Z] Failed to store API key in secret storage: ' + String(e));
     }
     this.client = this.createHttpClient(apiKey);
+    this.apiKeyForDiscovery = apiKey;
     this.fetchedModels = null;
     this.modelCacheTimestamp = 0;
     this._onDidChangeLanguageModelChatInformation.fire(undefined);
@@ -985,6 +1069,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       apiKey = await this.setApiKey();
     } else if (apiKey) {
       this.client = this.createHttpClient(apiKey);
+      this.apiKeyForDiscovery = apiKey;
     }
 
     this.log.debug('[Z] initClient result: ' + !!apiKey);
@@ -1506,6 +1591,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       this.tokenizer = null;
     }
     this.client = null;
+    this.apiKeyForDiscovery = undefined;
     this.fetchedModels = null;
     this.modelCacheTimestamp = 0;
   }
