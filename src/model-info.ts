@@ -22,7 +22,7 @@ export function inferToolCallingFromModelId(id: string): boolean {
 }
 
 export function inferVisionFromModelId(id: string): boolean {
-  return /(?:4\.5v|4\.6v|5v|vision|vl)/i.test(id);
+  return /(?:\d+(?:\.\d+)?v(?:-|$)|5v(?:-|$)|vision|vl|-ocr)/i.test(id);
 }
 
 export function resolveModelCapabilities(model: any): {
