@@ -1,4 +1,4 @@
-# Z for Copilot
+# Z.ai for Copilot
 
 [![Tests](https://github.com/selfagency/z-models-vscode/actions/workflows/ci.yml/badge.svg)](https://github.com/selfagency/z-models-vscode/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/selfagency/z-models-vscode/graph/badge.svg?token=0gHudqeY4p)](https://codecov.io/gh/selfagency/z-models-vscode)
 
@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>Access Z.ai (Zhipu) models within GitHub Copilot Chat</strong>
+  <strong>Access Z.ai (Zhipu) coding models within GitHub Copilot Chat</strong>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 - ⚡ **Streaming** - Real-time response streaming for faster interactions
 - 📊 **Usage Status Bar** - Status bar item tracks subscription usage limits
 
-## ⚠️ Coding Plan Scope
+## ⚠️ For Coding Plan users only
 
 Due to Z.ai Coding Plan restrictions, this extension is intentionally scoped to coding usage:
 
