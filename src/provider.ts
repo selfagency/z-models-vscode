@@ -261,7 +261,7 @@ interface ZParsedRequestOptions {
   temperature: number;
   topP?: number;
   safePrompt?: boolean;
-  thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
+  thinking?: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
   responseFormat?: { type: 'json_object' };
   webSearchTool?: { type: 'web_search'; web_search: Record<string, unknown> };
 }
@@ -664,18 +664,19 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const topP = typeof modelOptions.topP === 'number' ? modelOptions.topP : (foundModel.top_p ?? undefined);
     const safePrompt = typeof modelOptions.safePrompt === 'boolean' ? modelOptions.safePrompt : undefined;
 
-    const thinkingType =
-      modelOptions.thinking === false || modelOptions.thinkingType === 'disabled' ? 'disabled' : 'enabled';
+    const explicitThinking = modelOptions.thinking === true || modelOptions.thinkingType === 'enabled';
+    const explicitDisabled = modelOptions.thinking === false || modelOptions.thinkingType === 'disabled';
     const clearThinking =
       typeof modelOptions.clearThinking === 'boolean'
         ? modelOptions.clearThinking
         : typeof modelOptions.clear_thinking === 'boolean'
           ? modelOptions.clear_thinking
           : undefined;
-    const thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean } = {
-      type: thinkingType,
-      ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}),
-    };
+    const thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean } | undefined = explicitThinking
+      ? { type: 'enabled', ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}) }
+      : explicitDisabled
+        ? { type: 'disabled', ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}) }
+        : undefined;
 
     const responseFormat =
       modelOptions.responseFormat === 'json_object' || modelOptions.jsonMode === true
@@ -880,35 +881,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         temperature: m.temperature ?? m.defaultModelTemperature ?? undefined,
       }));
 
-      // Prefer the 'latest' variant within each model family when available.
-      // Determine a base id by stripping a trailing '-latest' or numeric suffix (e.g. '-2512').
-      const baseFor = (id: string) => id.replace(/-(?:latest|\d+)$/i, '');
-
-      const groups = new Map<string, (typeof rawModels)[number][]>();
-      for (const rm of rawModels) {
-        const base = baseFor(rm.id);
-        const arr = groups.get(base) ?? [];
-        arr.push(rm);
-        groups.set(base, arr);
-      }
-
-      const modelsToUse: (typeof rawModels)[number][] = [];
-      for (const [, arr] of groups) {
-        // Prefer an explicit 'latest' id if present
-        const latest = arr.find(rm => /latest/i.test(rm.id));
-        if (latest) {
-          modelsToUse.push(latest);
-          continue;
-        }
-        // Otherwise pick the variant with the largest context size as a sensible default
-        let best = arr[0];
-        for (const cand of arr) {
-          if ((cand.maxInputTokens ?? 0) > (best.maxInputTokens ?? 0)) {
-            best = cand;
-          }
-        }
-        modelsToUse.push(best);
-      }
+      const modelsToUse = rawModels;
 
       // Detect ambiguous (duplicate) display names and append the model id when needed.
       const nameCounts = new Map<string, number>();
