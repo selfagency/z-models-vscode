@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-04-15
+
+## What's Changed
+* fix: show all models, detect vision models, disable thinking by default by @selfagency in https://github.com/selfagency/z-models-vscode/pull/5
+
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.4...v0.1.5
+
+_Source: changes from v0.1.4 to v0.1.5._
+
+
 ## [0.1.4] - 2026-04-14
 
 ## What's Changed
