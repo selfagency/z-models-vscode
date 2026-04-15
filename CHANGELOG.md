@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-15
+
+## What's Changed
+* feat: coding-endpoint scope, MCP-first vision routing, and docs clarification by @selfagency in https://github.com/selfagency/z-models-vscode/pull/6
+
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.5...v0.1.6
+
+_Source: changes from v0.1.5 to v0.1.6._
+
+
 ## [0.1.5] - 2026-04-15
 
 ## What's Changed

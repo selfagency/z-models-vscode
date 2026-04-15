@@ -1,7 +1,7 @@
 {
   "name": "z-models-vscode",
   "displayName": "Z.ai for Copilot",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Access Z.ai (Zhipu) models within GitHub Copilot Chat",
   "categories": [
     "AI",
