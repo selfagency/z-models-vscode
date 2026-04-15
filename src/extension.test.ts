@@ -114,26 +114,21 @@ describe('extension', () => {
       (lm as any).registerMcpServerDefinitionProvider = old;
     });
 
-    it('executes manageSettings command and updates endpoint mode', async () => {
+    it('executes manageSettings command and shows coding endpoint info', async () => {
       activate(mockContext);
       const call = (commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls.find(
         ([name]) => name === 'z-chat.manageSettings',
       );
       const handler = call?.[1] as () => Promise<void>;
-      const config = {
-        get: vi.fn().mockReturnValue('zaiCoding'),
-        update: vi.fn().mockResolvedValue(undefined),
-      };
-      vi.spyOn(workspace, 'getConfiguration').mockReturnValue(config as any);
-      vi.spyOn(window, 'showQuickPick').mockResolvedValue({ label: 'zaiGeneral' } as any);
 
       await handler();
 
-      expect(config.update).toHaveBeenCalledWith('api.endpointMode', 'zaiGeneral', expect.anything());
-      expect(window.showInformationMessage).toHaveBeenCalled();
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        'Z.ai for Copilot uses the dedicated coding endpoint: https://api.z.ai/api/coding/paas/v4',
+      );
     });
 
-    it('executes manageSettings command and no-ops on cancel', async () => {
+    it('executes manageSettings command without mutating endpoint configuration', async () => {
       activate(mockContext);
       const call = (commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls.find(
         ([name]) => name === 'z-chat.manageSettings',
@@ -144,7 +139,6 @@ describe('extension', () => {
         update: vi.fn().mockResolvedValue(undefined),
       };
       vi.spyOn(workspace, 'getConfiguration').mockReturnValue(config as any);
-      vi.spyOn(window, 'showQuickPick').mockResolvedValue(undefined as any);
 
       await handler();
 

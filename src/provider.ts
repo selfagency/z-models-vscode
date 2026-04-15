@@ -9,6 +9,7 @@ import {
   ExtensionContext,
   LanguageModelChatInformation,
   LanguageModelChatMessage,
+  LanguageModelChatMessageRole,
   LanguageModelChatProvider,
   LanguageModelDataPart,
   LanguageModelError,
@@ -38,8 +39,7 @@ export interface MCPServerConfig {
   zread: boolean;
 }
 
-type ApiEndpointMode = 'zaiCoding' | 'zaiGeneral' | 'bigmodel';
-
+const CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
@@ -49,6 +49,7 @@ const MAX_TOOL_RESULT_CHARS = 20000;
 
 // Maximum number of tools per request
 const MAX_TOOLS_PER_REQUEST = 128;
+const VISION_MCP_TOOL_NAME_PATTERN = /(?:^|_)zvision_(?:analyze_image|diagnose_error_screenshot|understand_technical_diagram|analyze_data_visualization)|vision.*image/i;
 
 // Retry configuration for API requests
 const MAX_RETRIES = 10;
@@ -302,27 +303,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly userAgent: string;
 
   private getConfiguredBaseUrl(): string {
-    const defaultBaseByMode: Record<ApiEndpointMode, string> = {
-      zaiCoding: 'https://api.z.ai/api/coding/paas/v4',
-      zaiGeneral: 'https://api.z.ai/api/paas/v4',
-      bigmodel: 'https://open.bigmodel.cn/api/paas/v4',
-    };
-
-    try {
-      const config = workspace.getConfiguration('zModels');
-      const override = (config.get<string>('api.baseUrlOverride', '') || '').trim();
-      if (override.length > 0) {
-        return override;
-      }
-
-      const mode = config.get<ApiEndpointMode>('api.endpointMode', 'zaiCoding');
-      return defaultBaseByMode[mode] ?? defaultBaseByMode.zaiCoding;
-    } catch {
-      // Fallback for tests or environments without workspace configuration support.
-      return defaultBaseByMode.zaiCoding;
-    }
+    return CODING_BASE_URL;
   }
-
   /**
    * Convert HTTP status codes to proper VS Code LanguageModelError subtypes.
    */
@@ -375,6 +357,21 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
     }
     return false;
+  }
+
+  private findVisionMcpToolName(
+    tools: readonly { name: string }[] | undefined,
+  ): string | undefined {
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return undefined;
+    }
+
+    const exactImageTool = tools.find(t => t.name === 'mcp_zvision_analyze_image');
+    if (exactImageTool) {
+      return exactImageTool.name;
+    }
+
+    return tools.find(t => VISION_MCP_TOOL_NAME_PATTERN.test(t.name))?.name;
   }
 
   /**
@@ -756,8 +753,25 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.log.info('[Z] Provider constructed');
     if (autoInit) {
       this.log.info('[Z] Auto-initializing client on activation');
-      // Start initialization and remember the promise so incoming queries can await it.
-      this.initPromise = this.initClient(true);
+      // Start initialization and refresh model catalog immediately so the
+      // model picker reflects latest availability on startup.
+      this.initPromise = this.initClient(true)
+        .then(async initialized => {
+          if (!initialized) {
+            return false;
+          }
+
+          // Force a fresh discovery pass on startup.
+          this.fetchedModels = null;
+          this.modelCacheTimestamp = 0;
+          await this.fetchModels();
+          this.log.info('[Z] Startup model catalog refresh complete');
+          return true;
+        })
+        .catch(error => {
+          this.log.warn('[Z] Startup model catalog refresh failed: ' + String(error));
+          return false;
+        });
       // Do not await here (activation should not be blocked); consumers will await initPromise.
     }
   }
@@ -1026,7 +1040,14 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       return [];
     }
     this.log.info('[Z] Returning ' + models.length + ' models');
-    return models.map(model => getChatModelInfo(model));
+    return models.map(model =>
+      getChatModelInfo({
+        ...model,
+        // Coding-plan image handling is MCP-first; allow image attachments in UI
+        // regardless of model-native vision capability.
+        supportsVision: this.mcpConfig.vision ? true : model.supportsVision,
+      }),
+    );
   }
 
   /**
@@ -1071,11 +1092,18 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       supportsVision: false,
     };
 
-    // Handle vision fallback: if messages contain images but the model doesn't support vision,
-    // switch to a vision model automatically.
+    // Handle image attachments. When Vision MCP is available, prefer MCP analysis.
+    // Otherwise, use native-vision fallback behavior.
     let effectiveModelId = model.id;
     const hasImages = this.hasImageInput(messages);
-    if (hasImages && !this.modelSupportsVision(model.id)) {
+    const visionMcpToolName = this.findVisionMcpToolName(options.tools) ?? 'mcp_zvision_analyze_image';
+    const useVisionMcp = hasImages && this.mcpConfig.vision;
+
+    if (hasImages && useVisionMcp) {
+      this.log.info(`[Z] Image input detected; preferring Vision MCP tool: ${visionMcpToolName}`);
+    }
+
+    if (hasImages && !useVisionMcp && !this.modelSupportsVision(model.id)) {
       const visionFallback = this.getVisionFallbackModelId();
       if (visionFallback && visionFallback !== model.id) {
         this.log.warn(`[Z] Switching to vision model for image input: ${model.id} → ${visionFallback}`);
@@ -1083,10 +1111,26 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
     }
 
+    const requestMessages =
+      hasImages && useVisionMcp
+        ? [
+            ...messages,
+            {
+              role: LanguageModelChatMessageRole.User,
+              content: [
+                new LanguageModelTextPart(
+                  `An image is attached. Before answering, call the tool \`${visionMcpToolName}\` to analyze the image and use its result in your response.`,
+                ),
+              ],
+              name: undefined,
+            } as LanguageModelChatMessage,
+          ]
+        : messages;
+
     // Convert VS Code messages to Z format.
     // Important: a single VS Code message can include multiple tool results. Those must become
     // separate `role:"tool"` messages instead of replacing the whole message.
-    const _zMessages = this.toZMessages(messages);
+    const _zMessages = this.toZMessages(requestMessages);
 
     // Convert VS Code tools to Z format
     const zTools = options.tools?.map(tool => ({
@@ -1110,12 +1154,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     ];
 
     const abortController = new AbortController();
-    const cancellationSubscription =
+    const cancellationCandidate =
       typeof token.onCancellationRequested === 'function'
         ? token.onCancellationRequested(() => {
             abortController.abort();
             this.log.info('[Z] chat request cancelled by user');
           })
+        : undefined;
+    const cancellationSubscription =
+      cancellationCandidate && typeof (cancellationCandidate as { dispose?: unknown }).dispose === 'function'
+        ? (cancellationCandidate as { dispose: () => void })
         : { dispose: () => {} };
 
     try {

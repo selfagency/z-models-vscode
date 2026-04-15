@@ -18,14 +18,22 @@
 
 ## ✨ Features
 
-- 🧠 **All Z Models** - Every Z chat-capable model fetched dynamically from the API
+- 🧠 **Coding Plan Models** - Uses models exposed by the Z.ai Coding endpoint for Coding Plan usage
 - 🔀 **Model Picker** - Select Z models via the model selector dropdown on any Copilot Chat conversation
 - 💬 **Chat Participant** - Invoke `@z` directly in Copilot Chat for a dedicated, history-aware Z conversation
 - 🔧 **Tool Calling** - Function calling support for agentic workflows
-- 🖼️ **Vision** - Image input support for models that support it
+- 🖼️ **Vision via MCP** - Image understanding is routed through the Vision MCP server in coding workflows
 - 🔒 **Secure** - API key stored using VS Code's encrypted secrets API
 - ⚡ **Streaming** - Real-time response streaming for faster interactions
 - 📊 **Usage Status Bar** - Status bar item tracks subscription usage limits
+
+## ⚠️ Coding Plan Scope
+
+Due to Z.ai Coding Plan restrictions, this extension is intentionally scoped to coding usage:
+
+- It uses the dedicated Coding endpoint: `https://api.z.ai/api/coding/paas/v4`
+- It only supports Coding Plan model availability (coding models), not the full general API catalog
+- Vision/image workflows are provided through the Vision MCP server
 
 ## 🔧 Requirements
 
@@ -39,7 +47,7 @@
 2. **Open Command Palette** (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 3. **Run:** `Z: Manage API Key`
 4. **Enter your API key** from [z.ai](https://z.ai/manage-apikey/apikey-list)
-5. *(Optional)* **Run:** `Z: Manage Settings` to switch endpoint mode
+5. *(Optional)* **Run:** `Z: Manage Settings` to view coding-endpoint behavior details
 
 ## 🔑 Getting Your API Key
 
@@ -133,6 +141,8 @@ This extension supports Model Context Protocol (MCP) servers for enhanced capabi
 - **Search MCP**: Web and code search capabilities
 - **Reader MCP**: Document reading and PDF processing
 - **ZRead MCP**: Advanced reading and contextual analysis
+
+When an image is attached in chat and Vision MCP is enabled, the extension prefers MCP-based image analysis for Coding Plan compatibility.
 
 ### Configure MCP Servers
 
