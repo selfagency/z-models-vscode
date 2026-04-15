@@ -79,21 +79,9 @@ export function activate(context: vscode.ExtensionContext) {
         await updateApiKeyContext();
       }),
       vscode.commands.registerCommand('z-chat.manageSettings', async () => {
-        const config = vscode.workspace.getConfiguration('zModels');
-        const current = config.get<'zaiCoding' | 'zaiGeneral' | 'bigmodel'>('api.endpointMode', 'zaiCoding');
-        const picked = await vscode.window.showQuickPick(
-          [
-            { label: 'zaiCoding', detail: 'https://api.z.ai/api/coding/paas/v4' },
-            { label: 'zaiGeneral', detail: 'https://api.z.ai/api/paas/v4' },
-            { label: 'bigmodel', detail: 'https://open.bigmodel.cn/api/paas/v4' },
-          ],
-          { placeHolder: `Current endpoint mode: ${current}` },
+        await vscode.window.showInformationMessage(
+          'Z.ai for Copilot uses the dedicated coding endpoint: https://api.z.ai/api/coding/paas/v4',
         );
-
-        if (picked) {
-          await config.update('api.endpointMode', picked.label, vscode.ConfigurationTarget.Global);
-          await vscode.window.showInformationMessage(`Z.ai endpoint mode set to ${picked.label}.`);
-        }
       }),
     );
   } catch (error) {

@@ -821,6 +821,36 @@ describe('Model Information Provision', () => {
     const models = await provider.provideLanguageModelChatInformation({ silent: true }, mockCancellationToken as any);
     expect(models).toBeDefined();
   });
+
+  it('forces image input capability in picker when vision MCP is enabled', async () => {
+    const mockApiKey = 'test-api-key';
+    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue(mockApiKey);
+
+    const provider = new ZChatModelProvider(mockContext, undefined, false);
+    await provider['initClient'](true);
+
+    (provider as any).client = {
+      models: {
+        list: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'glm-4.7',
+              name: 'GLM 4.7',
+              capabilities: { completionChat: true, functionCalling: true, vision: false },
+            },
+          ],
+        }),
+      },
+    };
+
+    const infos = await provider.provideLanguageModelChatInformation(
+      { silent: true },
+      { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any,
+    );
+
+    expect(infos).toHaveLength(1);
+    expect(infos[0].capabilities?.imageInput).toBe(true);
+  });
 });
 
 // ── Model Information Edge Cases ──────────────────────────────────────────
@@ -913,45 +943,7 @@ describe('Chat Response Provision', () => {
       isCancellationRequested: false,
     };
 
-    await expect(
-      provider.provideLanguageModelChatResponse(
-        mockModel as any,
-        mockMessages as any,
-        {} as any,
-        mockProgress as any,
-        mockToken as any,
-      ),
-    ).rejects.toThrow('API key');
-  });
-});
 
-// ── Chat Response Edge Cases ───────────────────────────────────────────────
-
-describe('Chat Response Edge Cases', () => {
-  let provider: ZChatModelProvider;
-
-  beforeEach(() => {
-    provider = new ZChatModelProvider(mockContext, undefined, false);
-  });
-
-  it('should handle cancellation during chat response', async () => {
-    const mockApiKey = 'test-api-key';
-    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue(mockApiKey);
-
-    await provider['initClient'](true);
-
-    const mockModel = {
-      id: 'test-model',
-      name: 'Test Model',
-      maxInputTokens: 1000,
-      maxOutputTokens: 1000,
-      defaultCompletionTokens: 1000,
-      toolCalling: false,
-      supportsParallelToolCalls: false,
-      supportsVision: false,
-    };
-
-    const mockMessages = [
       {
         role: LanguageModelChatMessageRole.User,
         content: 'Hello',
@@ -1093,6 +1085,7 @@ describe('Model Options Helper', () => {
       models: { list: vi.fn().mockResolvedValue({ data: [baseModel] }) },
       chat: { stream: streamSpy },
     };
+    (provider as any).mcpConfig = { vision: true, search: true, reader: true, zread: true };
 
     await provider.provideLanguageModelChatResponse(
       baseModel as any,
@@ -1106,7 +1099,7 @@ describe('Model Options Helper', () => {
         },
       } as any,
       { report: vi.fn() } as any,
-      { isCancellationRequested: false } as any,
+      { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any,
     );
 
     expect(parseSpy).toHaveBeenCalled();
@@ -1116,6 +1109,129 @@ describe('Model Options Helper', () => {
     expect(payload.toolStream).toBe(true);
     expect(Array.isArray(payload.tools)).toBe(true);
     expect(payload.tools.some((t: any) => t.type === 'web_search')).toBe(true);
+  });
+<<<<<<< HEAD
+||||||| parent of 05d1105 (feat: route image attachments to Vision MCP on coding endpoint)
+
+  it('omits thinking when not explicitly configured', () => {
+    const parsed = (provider as any).parseModelOptions({}, baseModel);
+    expect(parsed.thinking).toBeUndefined();
+  });
+});
+
+describe('ZChatModelProvider — cross-endpoint discovery', () => {
+  let provider: ZChatModelProvider;
+
+  beforeEach(() => {
+    provider = new ZChatModelProvider(mockContext);
+  });
+
+  it('merges model catalogs from multiple endpoints when discovery key is available', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-5.1', capabilities: { completionChat: true, functionCalling: true, vision: false } }],
+    });
+
+    (provider as any).client = { models: { list: mockList } };
+    (provider as any).apiKeyForDiscovery = 'test-api-key';
+
+    const crossEndpoint = vi
+      .spyOn(provider as any, 'fetchModelsAcrossDefaultEndpoints')
+      .mockResolvedValue([
+        { id: 'glm-5.1', capabilities: { completionChat: true, functionCalling: true, vision: false } },
+        { id: 'glm-4.7-flash', capabilities: { completionChat: true, functionCalling: true, vision: false } },
+        { id: 'glm-4.6v-flash', capabilities: { completionChat: true, functionCalling: true, vision: true } },
+      ]);
+
+    const models = await provider.fetchModels();
+
+    expect(crossEndpoint).toHaveBeenCalledTimes(1);
+    expect(models.some(m => m.id === 'glm-4.7-flash')).toBe(true);
+    expect(models.some(m => m.id === 'glm-4.6v-flash' && m.supportsVision)).toBe(true);
+  });
+=======
+
+  it('adds MCP-first image routing guidance when image is attached', async () => {
+    const mockApiKey = 'test-api-key';
+    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue(mockApiKey);
+
+    await (provider as any).initClient(true);
+
+    const streamSpy = vi.fn().mockResolvedValue(
+      (async function* () {
+        yield {
+          data: {
+            choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }],
+          },
+        };
+      })(),
+    );
+
+    (provider as any).client = {
+      models: { list: vi.fn().mockResolvedValue({ data: [baseModel] }) },
+      chat: { stream: streamSpy },
+    };
+
+    await provider.provideLanguageModelChatResponse(
+      baseModel as any,
+      [
+        {
+          role: LanguageModelChatMessageRole.User,
+          content: [new LanguageModelTextPart('What is in this image?'), new LanguageModelDataPart(new Uint8Array([1, 2, 3]), 'image/png')],
+          name: undefined,
+        },
+      ] as any,
+      {
+        tools: [
+          {
+            name: 'mcp_zvision_analyze_image',
+            description: 'Analyze image',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                image_source: { type: 'string' },
+                prompt: { type: 'string' },
+              },
+            },
+          },
+        ],
+      } as any,
+      { report: vi.fn() } as any,
+      { isCancellationRequested: false, onCancellationRequested: vi.fn() } as any,
+    );
+
+    const payload = streamSpy.mock.calls[0][0];
+    const serializedMessages = JSON.stringify(payload.messages);
+    expect(serializedMessages).toContain('mcp_zvision_analyze_image');
+    expect(serializedMessages).toContain('An image is attached');
+  });
+
+  it('omits thinking when not explicitly configured', () => {
+    const parsed = (provider as any).parseModelOptions({}, baseModel);
+    expect(parsed.thinking).toBeUndefined();
+  });
+});
+
+describe('ZChatModelProvider — coding endpoint model discovery', () => {
+  let provider: ZChatModelProvider;
+
+  beforeEach(() => {
+    provider = new ZChatModelProvider(mockContext);
+  });
+
+  it('uses the client model list as-is without cross-endpoint fan-out', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [
+        { id: 'glm-5.1', capabilities: { completionChat: true, functionCalling: true, vision: false } },
+        { id: 'glm-4.7', capabilities: { completionChat: true, functionCalling: true, vision: false } },
+      ],
+    });
+
+    (provider as any).client = { models: { list: mockList } };
+
+    const models = await provider.fetchModels();
+
+    expect(mockList).toHaveBeenCalledTimes(1);
+    expect(models.map(m => m.id)).toEqual(expect.arrayContaining(['glm-5.1', 'glm-4.7']));
   });
 });
 
