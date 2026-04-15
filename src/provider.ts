@@ -832,8 +832,25 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.log.info('[Z] Provider constructed');
     if (autoInit) {
       this.log.info('[Z] Auto-initializing client on activation');
-      // Start initialization and remember the promise so incoming queries can await it.
-      this.initPromise = this.initClient(true);
+      // Start initialization and refresh model catalog immediately so the
+      // model picker reflects latest availability on startup.
+      this.initPromise = this.initClient(true)
+        .then(async initialized => {
+          if (!initialized) {
+            return false;
+          }
+
+          // Force a fresh discovery pass on startup.
+          this.fetchedModels = null;
+          this.modelCacheTimestamp = 0;
+          await this.fetchModels();
+          this.log.info('[Z] Startup model catalog refresh complete');
+          return true;
+        })
+        .catch(error => {
+          this.log.warn('[Z] Startup model catalog refresh failed: ' + String(error));
+          return false;
+        });
       // Do not await here (activation should not be blocked); consumers will await initPromise.
     }
   }
