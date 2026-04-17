@@ -305,21 +305,77 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private getConfiguredBaseUrl(): string {
     return CODING_BASE_URL;
   }
+
+  /**
+   * Extract a user-friendly error message from an API error response.
+   * Attempts to parse JSON and extract a message, otherwise returns a generic message.
+   * Logs the full details for debugging but hides them from the user.
+   */
+  private extractUserFriendlyErrorMessage(
+    status: number,
+    details: string | undefined,
+  ): { userMessage: string; logDetails: string } {
+    const logDetails = details || '';
+
+    // Try to parse JSON error response
+    if (details) {
+      try {
+        // Handle both direct JSON and JSON wrapped in a string
+        const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+        
+        // Check common error response structures
+        if (parsed?.error?.message) {
+          return { userMessage: parsed.error.message, logDetails };
+        }
+        if (parsed?.message) {
+          return { userMessage: parsed.message, logDetails };
+        }
+        if (parsed?.detail) {
+          return { userMessage: parsed.detail, logDetails };
+        }
+      } catch {
+        // Not JSON or couldn't parse — fall through to generic message
+      }
+    }
+
+    // Provide user-friendly messages based on HTTP status
+    const statusMessages: Record<number, string> = {
+      401: 'Invalid API key. Please check your Z.ai API key.',
+      403: 'Access denied. Your API key may not have permission for this operation.',
+      404: 'The requested endpoint was not found.',
+      429: 'Service temporarily overloaded. Please try again later.',
+      500: 'The service encountered an error. Please try again later.',
+      502: 'Service unavailable. Please try again later.',
+      503: 'Service temporarily unavailable. Please try again later.',
+      504: 'Service request timed out. Please try again later.',
+    };
+
+    const userMessage = statusMessages[status] ?? `Request failed with status ${status}. Please try again.`;
+    return { userMessage, logDetails };
+  }
+
   /**
    * Convert HTTP status codes to proper VS Code LanguageModelError subtypes.
+   * User-friendly error messages are shown; full details are logged for debugging.
    */
-  private toLanguageModelError(status: number, statusText: string, details: string): Error {
-    const message = `Z.ai API error: ${status} ${statusText}${details ? `\n${details}` : ''}`;
+  private toLanguageModelError(status: number, details: string): Error {
+    const { userMessage, logDetails } = this.extractUserFriendlyErrorMessage(status, details);
+
+    // Log full details for debugging (but don't show to user)
+    if (logDetails) {
+      this.log.debug(`[Z] Full error details (status=${status}): ${logDetails}`);
+    }
+
     if (status === 401 || status === 403) {
-      return LanguageModelError.NoPermissions(message);
+      return LanguageModelError.NoPermissions(userMessage);
     }
     if (status === 404) {
-      return LanguageModelError.NotFound(message);
+      return LanguageModelError.NotFound(userMessage);
     }
     if (status === 429) {
-      return LanguageModelError.Blocked(message);
+      return LanguageModelError.Blocked(userMessage);
     }
-    return new Error(message);
+    return new Error(userMessage);
   }
 
   /**
@@ -1347,18 +1403,20 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         throw new (LanguageModelError as any)('Request cancelled', 'cancelled');
       }
 
+      // Log full error details for debugging (but don't expose to user)
+      const fullErrorDetails = error instanceof Error ? error.stack || error.message : String(error);
+      this.log.debug('[Z] provideLanguageModelChatResponse full error details: ' + fullErrorDetails);
+
       // If the error already has an HTTP status, classify it
       const httpStatus = (error as any)?.response?.statusCode ?? (error as any)?.statusCode;
       if (typeof httpStatus === 'number' && httpStatus > 0) {
         const errorBody = (error as any)?.response?.body ?? '';
-        throw this.toLanguageModelError(httpStatus, '', typeof errorBody === 'string' ? errorBody : String(errorBody));
+        throw this.toLanguageModelError(httpStatus, typeof errorBody === 'string' ? errorBody : String(errorBody));
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      this.log.error(
-        '[Z] provideLanguageModelChatResponse error: ' +
-          (error instanceof Error ? error.stack || error.message : String(error)),
-      );
+      this.log.error('[Z] provideLanguageModelChatResponse error: ' + errorMessage);
+
       // Re-throw LanguageModelError as-is, wrap everything else
       if (error instanceof LanguageModelError) throw error;
       throw new Error(errorMessage);
