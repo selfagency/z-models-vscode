@@ -358,7 +358,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Convert HTTP status codes to proper VS Code LanguageModelError subtypes.
    * User-friendly error messages are shown; full details are logged for debugging.
    */
-  private toLanguageModelError(status: number, statusText: string, details: string): Error {
+  private toLanguageModelError(status: number, details: string): Error {
     const { userMessage, logDetails } = this.extractUserFriendlyErrorMessage(status, details);
 
     // Log full details for debugging (but don't show to user)
@@ -1411,7 +1411,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const httpStatus = (error as any)?.response?.statusCode ?? (error as any)?.statusCode;
       if (typeof httpStatus === 'number' && httpStatus > 0) {
         const errorBody = (error as any)?.response?.body ?? '';
-        throw this.toLanguageModelError(httpStatus, '', typeof errorBody === 'string' ? errorBody : String(errorBody));
+        throw this.toLanguageModelError(httpStatus, typeof errorBody === 'string' ? errorBody : String(errorBody));
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

@@ -216,7 +216,7 @@ describe('ZChatModelProvider — error handling', () => {
 
     it('extracts error message from JSON error response', () => {
       const details = JSON.stringify({ error: { message: 'Custom error from API' } });
-      const error = (provider as any).toLanguageModelError(500, '', details);
+      const error = (provider as any).toLanguageModelError(500, details);
       expect(error.message).toBe('Custom error from API');
     });
   });
