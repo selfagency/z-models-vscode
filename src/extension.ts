@@ -234,13 +234,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
     } catch (error) {
       if (error instanceof vscode.LanguageModelError) {
-        stream.markdown(
-          vscode.l10n.t('The selected model could not process this request right now ({0}).', error.code ?? 'unknown'),
-        );
+        // LanguageModelError has a user-friendly message already set by the provider
+        const message = error.message || `Request failed (${error.code || 'unknown'})`;
+        stream.markdown(vscode.l10n.t('The selected model could not process this request: {0}', message));
         return;
       }
 
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'Unknown error occurred';
       stream.markdown(vscode.l10n.t('Error: {0}', message));
     }
   };

@@ -362,7 +362,8 @@ describe('extension', () => {
       });
 
       expect(l10n.t).toHaveBeenCalled();
-      expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('off_topic'));
+      // New behavior: shows the message from LanguageModelError instead of the code
+      expect(mockStream.markdown).toHaveBeenCalledWith(expect.stringContaining('blocked'));
     });
 
     it('formats unknown thrown values with fallback message', async () => {
