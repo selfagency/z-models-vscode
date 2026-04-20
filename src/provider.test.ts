@@ -6,6 +6,7 @@ import {
     LanguageModelToolCallPart,
     LanguageModelToolResultPart,
     window,
+    workspace,
 } from 'vscode';
 import { formatModelName, getChatModelInfo, toZRole, ZChatModelProvider } from './provider.js';
 
@@ -1849,5 +1850,92 @@ describe('EventEmitter', () => {
     emitter.dispose();
     emitter.fire();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// ── getConfiguredBaseUrl ──────────────────────────────────────────────────────
+
+describe('getConfiguredBaseUrl', () => {
+  let provider: ZChatModelProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContext.subscriptions = [];
+  });
+
+  it('returns zaiCoding preset by default', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://api.z.ai/api/coding/paas/v4');
+  });
+
+  it('returns zaiGeneral preset when configured', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.endpointMode') return 'zaiGeneral';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://api.z.ai/api/paas/v4');
+  });
+
+  it('returns bigmodel preset when configured', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.endpointMode') return 'bigmodel';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://open.bigmodel.cn/api/paas/v4');
+  });
+
+  it('returns bigmodelCoding preset when configured', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.endpointMode') return 'bigmodelCoding';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://open.bigmodel.cn/api/coding/paas/v4');
+  });
+
+  it('falls back to zaiCoding for unknown endpointMode', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.endpointMode') return 'unknown';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://api.z.ai/api/coding/paas/v4');
+  });
+
+  it('prefers baseUrlOverride over endpointMode', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.baseUrlOverride') return 'https://custom.example.com/v4';
+        if (key === 'api.endpointMode') return 'bigmodel';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://custom.example.com/v4');
+  });
+
+  it('ignores whitespace-only baseUrlOverride', () => {
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((key: string, defaultValue: unknown) => {
+        if (key === 'api.baseUrlOverride') return '   ';
+        if (key === 'api.endpointMode') return 'bigmodel';
+        return defaultValue;
+      }),
+    } as any);
+    provider = new ZChatModelProvider(mockContext);
+    expect((provider as any).getConfiguredBaseUrl()).toBe('https://open.bigmodel.cn/api/paas/v4');
   });
 });

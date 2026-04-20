@@ -39,7 +39,13 @@ export interface MCPServerConfig {
   zread: boolean;
 }
 
-const CODING_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
+const ENDPOINT_PRESETS: Record<string, string> = {
+  zaiCoding: 'https://api.z.ai/api/coding/paas/v4',
+  zaiGeneral: 'https://api.z.ai/api/paas/v4',
+  bigmodel: 'https://open.bigmodel.cn/api/paas/v4',
+  bigmodelCoding: 'https://open.bigmodel.cn/api/coding/paas/v4',
+};
+
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
@@ -303,7 +309,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly userAgent: string;
 
   private getConfiguredBaseUrl(): string {
-    return CODING_BASE_URL;
+    const config = workspace.getConfiguration('zModels');
+    const baseUrlOverride = config.get<string>('api.baseUrlOverride', '').trim();
+    if (baseUrlOverride) {
+      return baseUrlOverride;
+    }
+    const endpointMode = config.get<string>('api.endpointMode', 'zaiCoding');
+    return ENDPOINT_PRESETS[endpointMode] ?? ENDPOINT_PRESETS.zaiCoding;
   }
 
   /**
@@ -803,8 +815,22 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     this.userAgent = userAgent ?? `z-models-vscode/unknown`;
 
-    // Load MCP server configuration from settings
     this.loadMCPConfig();
+
+    this.context.subscriptions.push(
+      workspace.onDidChangeConfiguration(event => {
+        if (
+          event.affectsConfiguration('zModels.api.endpointMode') ||
+          event.affectsConfiguration('zModels.api.baseUrlOverride')
+        ) {
+          this.log.info('[Z] API endpoint configuration changed, resetting client');
+          this.client = null;
+          this.fetchedModels = null;
+          this.modelCacheTimestamp = 0;
+          this._onDidChangeLanguageModelChatInformation.fire();
+        }
+      }),
+    );
 
     this.log.info('[Z] Provider constructed');
     if (autoInit) {

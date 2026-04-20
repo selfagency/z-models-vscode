@@ -113,9 +113,10 @@
           "enum": [
             "zaiCoding",
             "zaiGeneral",
-            "bigmodel"
+            "bigmodel",
+            "bigmodelCoding"
           ],
-          "markdownDescription": "Which API endpoint preset to use for model chat requests. `zaiCoding` uses `https://api.z.ai/api/coding/paas/v4`, `zaiGeneral` uses `https://api.z.ai/api/paas/v4`, and `bigmodel` uses `https://open.bigmodel.cn/api/paas/v4`."
+          "markdownDescription": "Which API endpoint preset to use for model chat requests. `zaiCoding` uses `https://api.z.ai/api/coding/paas/v4`, `zaiGeneral` uses `https://api.z.ai/api/paas/v4`, `bigmodel` uses `https://open.bigmodel.cn/api/paas/v4`, and `bigmodelCoding` uses `https://open.bigmodel.cn/api/coding/paas/v4`."
         },
         "zModels.api.baseUrlOverride": {
           "type": "string",
