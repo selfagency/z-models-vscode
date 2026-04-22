@@ -1939,3 +1939,80 @@ describe('getConfiguredBaseUrl', () => {
     expect((provider as any).getConfiguredBaseUrl()).toBe('https://open.bigmodel.cn/api/paas/v4');
   });
 });
+
+describe('endpoint configuration change listener', () => {
+  let provider: ZChatModelProvider;
+  let onDidChangeHandler: ((event: { affectsConfiguration: (section: string) => boolean }) => void) | undefined;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockContext.subscriptions = [];
+
+    vi.spyOn(workspace, 'getConfiguration').mockReturnValue({
+      get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
+    } as any);
+
+    vi.spyOn(workspace, 'onDidChangeConfiguration').mockImplementation((handler: any) => {
+      onDidChangeHandler = handler;
+      return { dispose: vi.fn() } as any;
+    });
+
+    provider = new ZChatModelProvider(mockContext);
+  });
+
+  it('resets client and cache when endpoint mode changes', () => {
+    const listener = vi.fn();
+    provider.onDidChangeLanguageModelChatInformation(listener);
+
+    (provider as any).client = { active: true };
+    (provider as any).fetchedModels = [{ id: 'glm-5.1' }];
+    (provider as any).modelCacheTimestamp = 123;
+
+    onDidChangeHandler?.({
+      affectsConfiguration: (section: string) => section === 'zModels.api.endpointMode',
+    });
+
+    expect((provider as any).client).toBeNull();
+    expect((provider as any).fetchedModels).toBeNull();
+    expect((provider as any).modelCacheTimestamp).toBe(0);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets client and cache when baseUrlOverride changes', () => {
+    const listener = vi.fn();
+    provider.onDidChangeLanguageModelChatInformation(listener);
+
+    (provider as any).client = { active: true };
+    (provider as any).fetchedModels = [{ id: 'glm-5.1' }];
+    (provider as any).modelCacheTimestamp = 456;
+
+    onDidChangeHandler?.({
+      affectsConfiguration: (section: string) => section === 'zModels.api.baseUrlOverride',
+    });
+
+    expect((provider as any).client).toBeNull();
+    expect((provider as any).fetchedModels).toBeNull();
+    expect((provider as any).modelCacheTimestamp).toBe(0);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reset client/cache for unrelated configuration changes', () => {
+    const listener = vi.fn();
+    provider.onDidChangeLanguageModelChatInformation(listener);
+
+    const initialClient = { active: true };
+    const initialModels = [{ id: 'glm-5.1' }];
+    (provider as any).client = initialClient;
+    (provider as any).fetchedModels = initialModels;
+    (provider as any).modelCacheTimestamp = 789;
+
+    onDidChangeHandler?.({
+      affectsConfiguration: () => false,
+    });
+
+    expect((provider as any).client).toBe(initialClient);
+    expect((provider as any).fetchedModels).toBe(initialModels);
+    expect((provider as any).modelCacheTimestamp).toBe(789);
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
