@@ -55,7 +55,7 @@ Status legend: ✅ implemented in code/tests, ✅ (verified) confirmed via curre
 
 - **Low / Enhancements (P3)**
   - 6.1 ✅ (verified) Naming conventions are compliant.
-  - 6.2 ✅ Added `Z: Manage Settings` command for endpoint mode.
+  - 6.2 ✅ Implemented `zModels.api.endpointMode` and `zModels.api.baseUrlOverride` configuration reading in `getConfiguredBaseUrl()` with endpoint presets (`zaiCoding`, `zaiGeneral`, `bigmodel`, `bigmodelCoding`), URL override priority, and configuration change listener.
   - 6.3 ✅ Added retry/backoff strategy for HTTP requests.
   - 6.4 ✅ Removed runtime `dotenv` usage and dependency from production deps.
   - 6.5 ✅ Removed eager startup activation event.
@@ -706,17 +706,21 @@ The naming conventions are actually followed correctly. No remediation needed.
 
 ---
 
-### 6.2 — No `managementCommand` Handling for Endpoint Configuration
+### 6.2 — Endpoint Mode and Base URL Configuration
 
-**File:** `package.json` / `src/extension.ts`
+**File:** `package.json` / `src/provider.ts`
 **Severity:** P3 — UX
 **Category:** Feature Gap
+**Status:** ✅ Implemented
 
-The `languageModelChatProviders` contribution includes a `managementCommand` (`z-chat.manageApiKey`), but there is no command or UI for managing endpoint configuration (switching between `zaiCoding`, `zaiGeneral`, and `bigmodel` modes, or setting a custom base URL override). Users must manually edit VS Code settings.
+The `zModels.api.endpointMode` and `zModels.api.baseUrlOverride` settings were defined in `package.json` but never read by the provider code. The `getConfiguredBaseUrl()` method was hardcoded to return `CODING_BASE_URL`.
 
-**Remediation:**
+**Implementation:**
 
-Consider adding a `Z: Manage Settings` command that opens a QuickPick for endpoint mode selection, or a webview-based settings panel.
+1. Replaced the hardcoded `CODING_BASE_URL` constant with an `ENDPOINT_PRESETS` map covering all four modes (`zaiCoding`, `zaiGeneral`, `bigmodel`, `bigmodelCoding`).
+2. Updated `getConfiguredBaseUrl()` to read `zModels.api.baseUrlOverride` first (takes priority if non-empty), then fall back to `zModels.api.endpointMode` preset.
+3. Added a `workspace.onDidChangeConfiguration` listener in the constructor to reset the client and invalidate the model cache when endpoint settings change, then fire `_onDidChangeLanguageModelChatInformation` so VS Code refreshes the model picker.
+4. Added 6 unit tests covering all endpoint modes, unknown mode fallback, override priority, and whitespace-only override handling.
 
 ---
 
@@ -1049,7 +1053,7 @@ While the test suite covers basic bidirectional ID mapping, it should also cover
 | ---- | ------------------------------------------------------- | ------ | --------------------- |
 | 5.3  | Evaluate `@vscode/prompt-tsx` adoption                  | 3h     | Prompt management     |
 | 5.7  | Consider initial `onDidChangeMcpServerDefinitions` fire | 30min  | Timing                |
-| 6.2  | Add settings management command                         | 2h     | Configuration UX      |
+| 6.2  | ✅ Endpoint mode and base URL override implemented       | —      | Configuration UX      |
 | 6.3  | Add retry logic for HTTP client                         | 2h     | Resilience            |
 | 6.4  | Move `dotenv` to devDependencies                        | 15min  | Bundle size           |
 | 6.5  | Remove `onStartupFinished` activation event             | 30min  | Startup performance   |
