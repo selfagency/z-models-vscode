@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-22
+
+## What's Changed
+* refactor: improve error handling with user-friendly messages by @selfagency in https://github.com/selfagency/z-models-vscode/pull/7
+* feat: implement endpointMode and baseUrlOverride config by @Teages in https://github.com/selfagency/z-models-vscode/pull/8
+
+## New Contributors
+* @Teages made their first contribution in https://github.com/selfagency/z-models-vscode/pull/8
+
+**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.6...v0.1.7
+
+_Source: changes from v0.1.6 to v0.1.7._
+
+
 ## [0.1.6] - 2026-04-15
 
 ## What's Changed
