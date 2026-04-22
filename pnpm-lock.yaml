@@ -25,8 +25,8 @@ importers:
         specifier: ^25.6.0
         version: 25.6.0
       '@types/vscode':
-        specifier: 1.116.0
-        version: 1.116.0
+        specifier: 1.109.0
+        version: 1.109.0
       '@typescript/native-preview':
         specifier: 7.0.0-dev.20260414.1
         version: 7.0.0-dev.20260414.1
@@ -791,8 +791,8 @@ packages:
   '@types/node@25.6.0':
     resolution: {integrity: sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==}
 
-  '@types/vscode@1.116.0':
-    resolution: {integrity: sha512-sYHp4MO6BqJ2PD7Hjt0hlIS3tMaYsVPJrd0RUjDJ8HtOYnyJIEej0bLSccM8rE77WrC+Xox/kdBwEFDO8MsxNA==}
+  '@types/vscode@1.109.0':
+    resolution: {integrity: sha512-0Pf95rnwEIwDbmXGC08r0B4TQhAbsHQ5UyTIgVgoieDe4cOnf92usuR5dEczb6bTKEp7ziZH4TV1TRGPPCExtw==}
 
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260414.1':
     resolution: {integrity: sha512-O7h9lNcE9YMA2TKw1YX9GZO3K/Kb1FUmxjEJAfBFvjQhGydIk4oNsuoOQ3RQHVvebCdFjNroZzoIXNeR3ceCdA==}
@@ -3045,7 +3045,7 @@ snapshots:
     dependencies:
       undici-types: 7.19.2
 
-  '@types/vscode@1.116.0': {}
+  '@types/vscode@1.109.0': {}
 
   '@typescript/native-preview-darwin-arm64@7.0.0-dev.20260414.1':
     optional: true
