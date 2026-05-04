@@ -1,5 +1,6 @@
 {
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "oxc.enable": true,
-  "beans.mcp.showStartupNotification": false
+  "beans.mcp.showStartupNotification": false,
+  "typescript.native-preview.tsdk": "/Users/daniel/Developer/z-models-vscode/node_modules/@typescript/native-preview"
 }

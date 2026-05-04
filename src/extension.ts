@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
+import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar } from '@agentsy/vscode';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
 import { UsageService } from './usage-service.js';
-import { UsageStatusBar } from './usage-status-bar.js';
 
 let activeProvider: ZChatModelProvider | undefined;
 let activeUsageService: UsageService | undefined;
@@ -18,6 +18,14 @@ try {
   // In test environments, package.json may not be resolvable
 }
 
+function extractResponseText(parts: readonly any[]): string {
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .filter((part): part is vscode.ChatResponseMarkdownPart => part instanceof vscode.ChatResponseMarkdownPart)
+    .map(part => part.value.value)
+    .join('');
+}
+
 function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageModelChatMessage[] {
   const messages: vscode.LanguageModelChatMessage[] = [];
 
@@ -27,12 +35,18 @@ function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageMode
       continue;
     }
 
+    // VS Code < 1.96
     if (turn instanceof vscode.ChatResponseTurn) {
-      const text = turn.response
-        .filter((part): part is vscode.ChatResponseMarkdownPart => part instanceof vscode.ChatResponseMarkdownPart)
-        .map(part => part.value.value)
-        .join('');
+      const text = extractResponseText(turn.response);
+      if (text) {
+        messages.push(vscode.LanguageModelChatMessage.Assistant(text));
+      }
+      continue;
+    }
 
+    // VS Code >= 1.96: ChatResponseTurn2 has 'content' property
+    if ('content' in turn && Array.isArray((turn as any).content)) {
+      const text = extractResponseText((turn as any).content);
       if (text) {
         messages.push(vscode.LanguageModelChatMessage.Assistant(text));
       }
@@ -45,30 +59,63 @@ function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageMode
 export function activate(context: vscode.ExtensionContext) {
   const logOutputChannel = vscode.window.createOutputChannel('Z Models', { log: true }) as vscode.LogOutputChannel;
 
+  if (context.secrets?.onDidChange) {
+    context.subscriptions.push(
+      context.secrets.onDidChange(event => {
+        if (event.key === 'Z_API_KEY') {
+          void context.secrets.get('Z_API_KEY').then(apiKey => {
+            void vscode.commands.executeCommand(
+              'setContext',
+              'zModels.hasApiKey',
+              Boolean(apiKey && apiKey.trim().length > 0),
+            );
+          });
+        }
+      }),
+    );
+  }
+
+  const apiKeyManager = new ApiKeyManager(context, {
+    secretKey: 'Z_API_KEY',
+    contextKey: 'zModels.hasApiKey',
+    displayName: 'Z.ai API Key',
+    promptMessage: 'Enter your Z.ai API key',
+  });
+  void apiKeyManager.initialize?.();
+  context.subscriptions.push(apiKeyManager);
+
+  const getApiKey = async (): Promise<string | undefined> => {
+    try {
+      const keyFromManager = (await apiKeyManager.getApiKey())?.trim();
+      if (keyFromManager) {
+        return keyFromManager;
+      }
+    } catch {
+      // fall back to legacy secret lookup in tests or older hosts
+    }
+    const keyFromSecrets = (await context.secrets.get('Z_API_KEY'))?.trim();
+    return keyFromSecrets && keyFromSecrets.length > 0 ? keyFromSecrets : undefined;
+  };
+
   let provider: ZChatModelProvider | undefined;
   const getProvider = (): ZChatModelProvider => {
     if (!provider) {
       const ua = `z-models-vscode/${extVersion} VSCode/${vscode.version}`;
-      provider = new ZChatModelProvider(context, logOutputChannel, true, ua);
+      provider = new ZChatModelProvider(context, logOutputChannel, true, ua, apiKeyManager);
       activeProvider = provider;
     }
     return provider;
   };
 
   const updateApiKeyContext = async () => {
-    const apiKey = await context.secrets.get('Z_API_KEY');
-    await vscode.commands.executeCommand('setContext', 'zModels.hasApiKey', Boolean(apiKey && apiKey.trim().length > 0));
+    const apiKey = await getApiKey();
+    await vscode.commands.executeCommand(
+      'setContext',
+      'zModels.hasApiKey',
+      Boolean(apiKey && apiKey.trim().length > 0),
+    );
   };
 
-  if (context.secrets?.onDidChange) {
-    context.subscriptions.push(
-      context.secrets.onDidChange(event => {
-        if (event.key === 'Z_API_KEY') {
-          void updateApiKeyContext();
-        }
-      }),
-    );
-  }
   void updateApiKeyContext();
 
   // Register the API-key command first so users can recover even if model/MCP APIs fail.
@@ -104,12 +151,26 @@ export function activate(context: vscode.ExtensionContext) {
   // Register MCP provider independently (guarded).
   try {
     if (vscode.lm?.registerMcpServerDefinitionProvider) {
-      const mcpServerDefinitionProvider = new ZMcpServerDefinitionProvider(context);
+      const mcpServerDefinitionProvider = new ZMcpServerDefinitionProvider(context, apiKeyManager);
       context.subscriptions.push(
         vscode.lm.registerMcpServerDefinitionProvider('zModels.mcpServers', mcpServerDefinitionProvider),
       );
     } else {
       logOutputChannel?.warn('[Z] MCP server definition provider API is unavailable in this VS Code build.');
+
+      // Show user-facing warning on first run without MCP support (fire-and-forget)
+      const shownMcpWarning = context.globalState.get<boolean>('z-mcp-warning-shown');
+      if (!shownMcpWarning) {
+        vscode.window
+          .showWarningMessage(
+            'Z.ai Vision & Search tools require VS Code 1.95 or later. Please update VS Code to enable MCP servers.',
+            'Update VS Code',
+            'Dismiss',
+          )
+          .then(() => {
+            context.globalState.update('z-mcp-warning-shown', true);
+          });
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown MCP registration error';
@@ -121,17 +182,71 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // ── Usage tracking status bar ──────────────────────────────────────────
-  const usageBar = new UsageStatusBar();
+  let usageViewMode: 'hourly' | 'weekly' = 'hourly';
+
+  const pickHourlyQuota = (quotas: Array<{ unit: number; number: number; percentage: number; nextResetTime?: number }>) => {
+    const hourly = quotas.filter(q => q.unit === 3).sort((a, b) => a.number - b.number);
+    return hourly.length > 0 ? hourly[0] : quotas[0];
+  };
+
+  const pickWeeklyQuota = (quotas: Array<{ unit: number; number: number; percentage: number; nextResetTime?: number }>) => {
+    const weekly = quotas.filter(q => q.unit === 6).sort((a, b) => a.number - b.number);
+    return weekly.length > 0 ? weekly[0] : pickHourlyQuota(quotas);
+  };
+
+  const mapWindow = (unit: number): UsageQuota['window'] => {
+    if (unit === 3) return 'hourly';
+    if (unit === 6) return 'weekly';
+    if (unit === 5) return 'monthly';
+    return 'daily';
+  };
+
+  const quotaDataSource: IQuotaDataSource = {
+    async getQuota(): Promise<UsageQuota> {
+      if (!activeUsageService) {
+        throw new Error('Usage service not initialized');
+      }
+      const result = await activeUsageService.fetchUsage();
+      if (!result.success || !result.data || result.data.tokenQuotas.length === 0) {
+        throw new Error(result.error ?? 'No usage quota available');
+      }
+
+      const selected = usageViewMode === 'hourly'
+        ? pickHourlyQuota(result.data.tokenQuotas)
+        : pickWeeklyQuota(result.data.tokenQuotas);
+
+      return {
+        used: selected.percentage,
+        total: 100,
+        unit: 'tokens',
+        window: mapWindow(selected.unit),
+        percentUsed: Math.max(0, Math.min(1, selected.percentage / 100)),
+        expiresAt: selected.nextResetTime ? new Date(selected.nextResetTime) : undefined,
+      };
+    },
+
+    async refreshQuota(): Promise<UsageQuota> {
+      return this.getQuota();
+    },
+  };
+
+  const usageBar = new UsageStatusBar({
+    displayName: 'Z.ai Usage',
+    warningThreshold: 0.8,
+    errorThreshold: 0.95,
+    refreshIntervalMs: 60_000,
+    quotaDataSource,
+  });
   activeUsageBar = usageBar;
   context.subscriptions.push(usageBar);
+  void usageBar.show();
 
   const refreshUsage = async () => {
-    const apiKey = await context.secrets.get('Z_API_KEY');
+    const apiKey = await getApiKey();
     if (!apiKey || !apiKey.trim()) {
-      usageBar.showNoKey();
+      usageBar.hide();
       return;
     }
-    usageBar.showLoading();
     try {
       const svc = activeUsageService ?? new UsageService(apiKey);
       if (!activeUsageService) {
@@ -139,17 +254,13 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         svc.updateApiKey(apiKey);
       }
-      const result = await svc.fetchUsage();
-      if (result.success && result.data) {
-        usageBar.updateUsage(result.data);
-        logOutputChannel?.info(`[Z] Usage updated: ${result.data.tokenQuotas.map(q => `${q.windowName}=${q.percentage}%`).join(', ')}`);
-      } else {
-        usageBar.showError(result.error ?? 'Failed to fetch usage');
-        logOutputChannel?.warn(`[Z] Usage fetch failed: ${result.error}`);
+      await usageBar.show();
+      const quota = await usageBar.refresh();
+      if (quota) {
+        logOutputChannel?.info(`[Z] Usage updated: ${Math.round(quota.percentUsed * 100)}% (${quota.window})`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
-      usageBar.showError(msg);
       logOutputChannel?.error(`[Z] Usage error: ${msg}`);
     }
   };
@@ -157,7 +268,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('z-chat.refreshUsage', refreshUsage),
     vscode.commands.registerCommand('z-chat.toggleUsageView', async () => {
-      usageBar.toggleView();
+      usageViewMode = usageViewMode === 'hourly' ? 'weekly' : 'hourly';
+      await refreshUsage();
     }),
   );
 
@@ -177,6 +289,13 @@ export function activate(context: vscode.ExtensionContext) {
         if (event.key === 'Z_API_KEY') void refreshUsage();
       }),
     );
+  }
+
+  if (typeof apiKeyManager.onDidChangeApiKey === 'function') {
+    apiKeyManager.onDidChangeApiKey(() => {
+      void updateApiKeyContext();
+      void refreshUsage();
+    });
   }
 
   // Adjust refresh interval when settings change
@@ -206,7 +325,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     if (commandName === 'vision') {
-      stream.markdown('For vision tasks, attach an image in chat (for image-input models) or enable the Vision MCP server.');
+      stream.markdown(
+        'For vision tasks, attach an image in chat (for image-input models) or enable the Vision MCP server.',
+      );
       return;
     }
 

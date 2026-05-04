@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { ApiKeyManager } from '@agentsy/vscode';
 
 const MCP_URLS = {
   search: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
@@ -19,7 +20,10 @@ export class ZMcpServerDefinitionProvider implements vscode.McpServerDefinitionP
   private readonly emitter = new vscode.EventEmitter<void>();
   readonly onDidChangeMcpServerDefinitions = this.emitter.event;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey'>,
+  ) {
     const disposables: vscode.Disposable[] = [this.emitter];
 
     if (vscode.workspace?.onDidChangeConfiguration) {
@@ -82,13 +86,18 @@ export class ZMcpServerDefinitionProvider implements vscode.McpServerDefinitionP
     server: vscode.McpServerDefinition,
     _token: vscode.CancellationToken,
   ): Promise<vscode.McpServerDefinition | undefined> {
-    const apiKey = this.context.secrets?.get ? await this.context.secrets.get('Z_API_KEY') : undefined;
+    const managerKey = this.apiKeyManager ? await this.apiKeyManager.getApiKey() : undefined;
+    const apiKey = managerKey ?? (this.context.secrets?.get ? await this.context.secrets.get('Z_API_KEY') : undefined);
     if (!apiKey) {
       return undefined;
     }
 
     if (server instanceof vscode.McpHttpServerDefinition) {
-      server.headers = { ...server.headers, Authorization: `Bearer ${apiKey}` };
+      server.headers = {
+        ...server.headers,
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Language': 'en-US,en',
+      };
       return server;
     }
 

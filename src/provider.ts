@@ -1,6 +1,7 @@
-import { LLMStreamProcessor } from '@selfagency/llm-stream-parser/processor';
+import { LLMStreamProcessor } from '@agentsy/core/processor';
+import { cancellationTokenToAbortSignal, type ApiKeyManager } from '@agentsy/vscode';
 import got from 'got';
-import { randomBytes } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { get_encoding, Tiktoken } from 'tiktoken';
 import {
   CancellationToken,
@@ -24,10 +25,26 @@ import {
   workspace,
 } from 'vscode';
 import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
+import { normalizeZAiChunk } from './normalizers/z-ai.js';
 import { toZRole } from './role-utils.js';
+
+/**
+ * LanguageModelThinkingPart is a proposed API for emitting thinking/reasoning content.
+ * This is a local implementation until it's part of the stable vscode API.
+ */
+class LanguageModelThinkingPart {
+  constructor(public readonly value: string) {}
+}
 
 // For deterministic unit tests, environment fallback can be explicitly enabled.
 const allowEnvInTests = process.env.Z_MODELS_ALLOW_ENV_API_KEY_IN_TESTS === '1';
+
+function toAbortSignalSafe(token: CancellationToken): AbortSignal {
+  if (typeof token?.onCancellationRequested === 'function') {
+    return cancellationTokenToAbortSignal(token);
+  }
+  return new AbortController().signal;
+}
 
 /**
  * MCP Server configuration
@@ -55,7 +72,8 @@ const MAX_TOOL_RESULT_CHARS = 20000;
 
 // Maximum number of tools per request
 const MAX_TOOLS_PER_REQUEST = 128;
-const VISION_MCP_TOOL_NAME_PATTERN = /(?:^|_)zvision_(?:analyze_image|diagnose_error_screenshot|understand_technical_diagram|analyze_data_visualization)|vision.*image/i;
+const VISION_MCP_TOOL_NAME_PATTERN =
+  /(?:^|_)zvision_(?:analyze_image|diagnose_error_screenshot|understand_technical_diagram|analyze_data_visualization)|vision.*image/i;
 
 // Retry configuration for API requests
 const MAX_RETRIES = 10;
@@ -63,19 +81,46 @@ const BASE_RETRY_DELAY_MS = 2000;
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
 const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutputTokens?: number }> = {
-  'glm-4.6': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  // GLM-5 series (Preserved Thinking enabled by default)
   'glm-5': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5.1': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-4.6v': { maxInputTokens: 128_000 },
+
+  // GLM-4.7 series (Preserved Thinking enabled by default)
+  'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-4.7-flash': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-4.7-flashx': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+
+  // GLM-4.6 series
+  'glm-4.6': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-4.6v': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
+  'glm-4.6v-flash': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
+  'glm-4.6v-flashx': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
+
+  // GLM-4.5 series
+  'glm-4.5': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
+  'glm-4.5-air': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
+  'glm-4.5-x': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
+  'glm-4.5-airx': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
+  'glm-4.5-flash': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
+  'glm-4.5v': { maxInputTokens: 8_000, maxOutputTokens: 16_000 },
+
+  // Other models
+  'glm-4-32b-0414-128k': { maxInputTokens: 128_000, maxOutputTokens: 16_000 },
+  'autoglm-phone-multilingual': { maxInputTokens: 64_000, maxOutputTokens: 4_000 },
 };
 
 function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
   const normalized = id.toLowerCase();
   return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
 }
+
+/**
+ * Union type for language model response parts including thinking content.
+ * Extends the standard LanguageModelResponsePart to support LanguageModelThinkingPart.
+ */
+type LanguageModelResponsePartWithThinking = LanguageModelResponsePart | LanguageModelThinkingPart;
 
 // ── Text-embedded tool call token parsing ──────────────────────────────────
 // Z.ai sometimes emits tool calls as text tokens like:
@@ -222,7 +267,12 @@ function tryParseJson(text: string): Record<string, unknown> | undefined {
 /**
  * Message types for Z API
  */
-export type ZContent = string | Array<{ type: 'text'; text: string } | { type: 'image_url'; imageUrl: string }>;
+export type ZContent = string | Array<
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; imageUrl: string }
+  | { type: 'video_url'; videoUrl: string }
+  | { type: 'file_url'; fileUrl: string }
+>;
 
 export type ZToolCall = {
   id: string;
@@ -301,12 +351,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   // Track token usage from API responses
   private usageMetrics = { promptTokens: 0, completionTokens: 0 };
   private usageReported = false;
+  // Accumulate reasoning_content from streaming response for multi-turn Preserved Thinking
+  private accumulatedReasoningContent = '';
   // Text-embedded tool call parser state
   private textToolBuffer = '';
   private textToolActive: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined;
   private emittedTextToolCallKeys = new Set<string>();
   // User-Agent header for API requests
   private readonly userAgent: string;
+  private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>;
 
   private getConfiguredBaseUrl(): string {
     const config = workspace.getConfiguration('zModels');
@@ -334,7 +387,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       try {
         // Handle both direct JSON and JSON wrapped in a string
         const parsed = typeof details === 'string' ? JSON.parse(details) : details;
-        
+
         // Check common error response structures
         if (parsed?.error?.message) {
           return { userMessage: parsed.error.message, logDetails };
@@ -427,9 +480,45 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     return false;
   }
 
-  private findVisionMcpToolName(
-    tools: readonly { name: string }[] | undefined,
-  ): string | undefined {
+  private hasVideoInput(messages: readonly LanguageModelChatMessage[]): boolean {
+    for (const msg of messages) {
+      for (const part of msg.content) {
+        if (part instanceof LanguageModelDataPart && part.mimeType?.startsWith('video/')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private hasFileInput(messages: readonly LanguageModelChatMessage[]): boolean {
+    // Document MIME types that should be handled as file_url chunks
+    const documentMimeTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/csv',
+      'text/markdown',
+    ];
+    for (const msg of messages) {
+      for (const part of msg.content) {
+        if (part instanceof LanguageModelDataPart) {
+          const mimeType = part.mimeType?.toLowerCase();
+          if (mimeType && documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(type.split('/')[0] + '/'))) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  private findVisionMcpToolName(tools: readonly { name: string }[] | undefined): string | undefined {
     if (!Array.isArray(tools) || tools.length === 0) {
       return undefined;
     }
@@ -454,11 +543,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   /**
    * Report token usage metrics to VS Code Chat UI via LanguageModelDataPart.
    */
-  private reportUsageMetrics(progress: Progress<LanguageModelResponsePart>): void {
+  private reportUsageMetrics(progress: Progress<LanguageModelResponsePartWithThinking>): void {
     if (this.usageReported) return;
     if (this.usageMetrics.promptTokens > 0 || this.usageMetrics.completionTokens > 0) {
       const totalTokens = this.usageMetrics.promptTokens + this.usageMetrics.completionTokens;
-      this.log.info(`[Z] Token usage: prompt=${this.usageMetrics.promptTokens}, completion=${this.usageMetrics.completionTokens}, total=${totalTokens}`);
+      this.log.info(
+        `[Z] Token usage: prompt=${this.usageMetrics.promptTokens}, completion=${this.usageMetrics.completionTokens}, total=${totalTokens}`,
+      );
       try {
         progress.report(
           LanguageModelDataPart.json(
@@ -479,6 +570,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   }
 
   private async getApiKeyFromSecretsOrEnv(): Promise<string | undefined> {
+    if (this.apiKeyManager) {
+      const fromManager = (await this.apiKeyManager.getApiKey())?.trim();
+      if (fromManager) {
+        return fromManager;
+      }
+    }
+
     const fromSecrets = await this.context.secrets.get('Z_API_KEY');
     if (fromSecrets && fromSecrets.trim().length > 0) {
       return fromSecrets;
@@ -495,7 +593,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
   /* c8 ignore start */
   private createHttpClient(apiKey: string): {
-    models: { list: () => Promise<{ data: any[] }> };
+    models: { list: (abortSignal?: AbortSignal) => Promise<{ data: any[] }> };
     chat: {
       stream: (payload: {
         model: string;
@@ -535,6 +633,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'User-Agent': this.userAgent,
+      'Accept-Language': 'en-US,en',
     };
 
     const retry = {
@@ -558,12 +657,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     return {
       models: {
-        list: async () => {
+        list: async (abortSignal?: AbortSignal) => {
           try {
             const data = await got
               .get(`${baseUrl}/models`, {
                 headers,
                 retry,
+                signal: abortSignal,
               })
               .json<any>();
             return { data: Array.isArray(data?.data) ? data.data : [] };
@@ -737,10 +837,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         : typeof modelOptions.clear_thinking === 'boolean'
           ? modelOptions.clear_thinking
           : undefined;
+
+    // Smart-default clear_thinking based on endpoint: disabled (false) for coding, enabled (true) for general
+    const isOnCodingEndpoint = this.getConfiguredBaseUrl().includes('/coding/');
+    const defaultClearThinking = isOnCodingEndpoint ? false : true;
+    const finalClearThinking = clearThinking !== undefined ? clearThinking : defaultClearThinking;
+
     const thinking: { type: 'enabled' | 'disabled'; clear_thinking?: boolean } | undefined = explicitThinking
-      ? { type: 'enabled', ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}) }
+      ? { type: 'enabled', clear_thinking: finalClearThinking }
       : explicitDisabled
-        ? { type: 'disabled', ...(clearThinking !== undefined ? { clear_thinking: clearThinking } : {}) }
+        ? { type: 'disabled', clear_thinking: finalClearThinking }
         : undefined;
 
     const responseFormat =
@@ -763,7 +869,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           ? modelOptions.web_search
           : {
               enable: true,
-              search_engine: 'search-prime',
+              search_engine: 'search_pro_jina',
               search_result: true,
             };
 
@@ -796,6 +902,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     // Default is false to avoid prompting during unit tests which instantiate the provider.
     autoInit: boolean = false,
     userAgent?: string,
+    apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>,
   ) {
     // Accept an optional logOutputChannel to keep tests simple. Provide a no-op fallback when not available.
     if (logOutputChannel) {
@@ -814,6 +921,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }
 
     this.userAgent = userAgent ?? `z-models-vscode/unknown`;
+    this.apiKeyManager = apiKeyManager;
 
     this.loadMCPConfig();
 
@@ -885,13 +993,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * Generate a valid VS Code tool call ID (alphanumeric, exactly 9 characters)
    */
   public generateToolCallId(): string {
-    const bytes = randomBytes(8)
-      .toString('base64url')
-      .replace(/[^a-zA-Z0-9]/g, '');
-    if (bytes.length >= 9) {
-      return bytes.slice(0, 9);
-    }
-    return `${bytes}${randomBytes(8).toString('hex')}`.slice(0, 9);
+    // Use cryptographically strong 128-bit UUID, convert to 9-char alphanumeric ID
+    // This is far more robust than randomBytes(8) which has only 64-bit entropy
+    return randomUUID().replace(/-/g, '').slice(0, 9);
   }
 
   /**
@@ -917,10 +1021,50 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   }
 
   /**
+   * Fetch token limits for a specific model from the Z API.
+   * Falls back to known hardcoded limits if the API request fails.
+   */
+  private async fetchModelTokenLimits(
+    modelId: string,
+    abortSignal?: AbortSignal,
+  ): Promise<{ maxInputTokens?: number; maxOutputTokens?: number }> {
+    try {
+      if (!this.client) {
+        return getKnownTokenLimits(modelId);
+      }
+
+      const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
+      const apiKey = await this.getApiKeyFromSecretsOrEnv();
+      if (!apiKey) {
+        return getKnownTokenLimits(modelId);
+      }
+
+      const response = (await got
+        .get(`${baseUrl}/models/${modelId}`, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'User-Agent': this.userAgent,
+          },
+          signal: abortSignal,
+        })
+        .json()) as any;
+
+      return {
+        maxInputTokens: response.context_window ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxInputTokens,
+        maxOutputTokens:
+          response.max_completion_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      };
+    } catch {
+      // Fall back to known limits if API fetch fails
+      return getKnownTokenLimits(modelId);
+    }
+  }
+
+  /**
    * Fetch available chat models from the Z API and cache the result.
    * Returns an empty array if the client is not initialized or the request fails.
    */
-  public async fetchModels(): Promise<ZModel[]> {
+  public async fetchModels(abortSignal?: AbortSignal): Promise<ZModel[]> {
     if (this.fetchedModels !== null && Date.now() - this.modelCacheTimestamp < ZChatModelProvider.MODEL_CACHE_TTL_MS) {
       return this.fetchedModels;
     }
@@ -936,7 +1080,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       // Compatibility path: tests and advanced users can inject a custom client with models.list().
       if (this.client?.models?.list) {
         usedClientList = true;
-        const response = await this.client.models.list();
+        const response = await this.client.models.list(abortSignal);
         zModels = Array.isArray(response?.data) ? response.data : [];
       }
 
@@ -962,20 +1106,26 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
       const chatModels = zModels.filter(m => resolveModelCapabilities(m).completionChat !== false);
 
-      const rawModels = chatModels.map(m => ({
-        capabilities: resolveModelCapabilities(m),
-        id: m.id,
-        originalName: m.name ?? formatModelName(m.id),
-        detail: m.detail ?? m.description ?? undefined,
-        maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? getKnownTokenLimits(m.id).maxInputTokens ?? 32768,
-        maxOutputTokens: m.maxOutputTokens ?? getKnownTokenLimits(m.id).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-        defaultCompletionTokens:
-          m.defaultCompletionTokens ?? getKnownTokenLimits(m.id).maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
-        toolCalling: resolveModelCapabilities(m).functionCalling,
-        supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
-        supportsVision: resolveModelCapabilities(m).vision,
-        temperature: m.temperature ?? m.defaultModelTemperature ?? undefined,
-      }));
+      // Fetch token limits in parallel for all models
+      const rawModels = await Promise.all(
+        chatModels.map(async m => {
+          const tokenLimits = await this.fetchModelTokenLimits(m.id, abortSignal);
+          return {
+            capabilities: resolveModelCapabilities(m),
+            id: m.id,
+            originalName: m.name ?? formatModelName(m.id),
+            detail: m.detail ?? m.description ?? undefined,
+            maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? tokenLimits.maxInputTokens ?? 32768,
+            maxOutputTokens: m.maxOutputTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+            defaultCompletionTokens:
+              m.defaultCompletionTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
+            toolCalling: resolveModelCapabilities(m).functionCalling,
+            supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
+            supportsVision: resolveModelCapabilities(m).vision,
+            temperature: m.temperature ?? m.defaultModelTemperature ?? undefined,
+          };
+        }),
+      );
 
       const modelsToUse = rawModels;
 
@@ -1025,6 +1175,18 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    * @returns A promise that resolves to the entered API key if valid, or undefined if cancelled
    */
   public async setApiKey(): Promise<string | undefined> {
+    if (this.apiKeyManager?.setApiKey) {
+      await this.apiKeyManager.setApiKey();
+      const stored = await this.getApiKeyFromSecretsOrEnv();
+      if (stored) {
+        this.client = this.createHttpClient(stored);
+        this.fetchedModels = null;
+        this.modelCacheTimestamp = 0;
+        this._onDidChangeLanguageModelChatInformation.fire(undefined);
+      }
+      return stored;
+    }
+
     let apiKey: string | undefined = await this.getApiKeyFromSecretsOrEnv();
     this.log.debug('[Z] Prompting user for API key (existing present: ' + !!apiKey + ')');
     apiKey = await window.showInputBox({
@@ -1116,20 +1278,26 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       return [];
     }
 
-    const models = await this.fetchModels();
-    if (token.isCancellationRequested) {
-      this.log.debug('[Z] provideLanguageModelChatInformation cancelled after model fetch');
-      return [];
+    const abortSignal = toAbortSignalSafe(token);
+
+    try {
+      const models = await this.fetchModels(abortSignal);
+      if (token.isCancellationRequested) {
+        this.log.debug('[Z] provideLanguageModelChatInformation cancelled after model fetch');
+        return [];
+      }
+      this.log.info('[Z] Returning ' + models.length + ' models');
+      return models.map(model =>
+        getChatModelInfo({
+          ...model,
+          // Coding-plan image handling is MCP-first; allow image attachments in UI
+          // regardless of model-native vision capability.
+          supportsVision: this.mcpConfig.vision ? true : model.supportsVision,
+        }),
+      );
+    } finally {
+      // no-op
     }
-    this.log.info('[Z] Returning ' + models.length + ' models');
-    return models.map(model =>
-      getChatModelInfo({
-        ...model,
-        // Coding-plan image handling is MCP-first; allow image attachments in UI
-        // regardless of model-native vision capability.
-        supportsVision: this.mcpConfig.vision ? true : model.supportsVision,
-      }),
-    );
   }
 
   /**
@@ -1139,7 +1307,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     model: LanguageModelChatInformation,
     messages: Array<LanguageModelChatMessage>,
     options: ProvideLanguageModelChatResponseOptions,
-    progress: Progress<LanguageModelResponsePart>,
+    progress: Progress<LanguageModelResponsePartWithThinking>,
     token: CancellationToken,
   ): Promise<void> {
     this.log.info(`[Z] provideLanguageModelChatResponse start for model=${model.id}, messages=${messages.length}`);
@@ -1150,6 +1318,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.emittedTextToolCallKeys.clear();
     this.usageMetrics = { promptTokens: 0, completionTokens: 0 };
     this.usageReported = false;
+    // Reset accumulated reasoning_content for new response
+    this.accumulatedReasoningContent = '';
 
     // Check if client is initialized
     if (!this.client) {
@@ -1235,18 +1405,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       ...(webSearchTool ? [webSearchTool] : []),
     ];
 
-    const abortController = new AbortController();
-    const cancellationCandidate =
-      typeof token.onCancellationRequested === 'function'
-        ? token.onCancellationRequested(() => {
-            abortController.abort();
-            this.log.info('[Z] chat request cancelled by user');
-          })
-        : undefined;
-    const cancellationSubscription =
-      cancellationCandidate && typeof (cancellationCandidate as { dispose?: unknown }).dispose === 'function'
-        ? (cancellationCandidate as { dispose: () => void })
-        : { dispose: () => {} };
+    const abortSignal = toAbortSignalSafe(token);
 
     try {
       const streamResult = await this.client.chat.stream({
@@ -1261,7 +1420,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         toolStream: requestTools.length > 0 ? true : undefined,
         thinking,
         responseFormat,
-        abortSignal: abortController.signal,
+        abortSignal,
       });
 
       const streamProcessor = new LLMStreamProcessor({
@@ -1293,24 +1452,30 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           break;
         }
 
+        const normalized = normalizeZAiChunk((chunk?.data as any) ?? {});
         const delta = chunk?.data?.choices?.[0]?.delta;
         const finishReason = chunk?.data?.choices?.[0]?.finish_reason;
 
         // Track usage metrics from streaming response
-        const usage = (chunk?.data as any)?.usage;
-        if (usage) {
-          if (typeof usage.prompt_tokens === 'number') this.usageMetrics.promptTokens = usage.prompt_tokens;
-          if (typeof usage.completion_tokens === 'number') this.usageMetrics.completionTokens = usage.completion_tokens;
+        if (normalized.usage) {
+          if (typeof normalized.usage.inputTokens === 'number') this.usageMetrics.promptTokens = normalized.usage.inputTokens;
+          if (typeof normalized.usage.outputTokens === 'number') this.usageMetrics.completionTokens = normalized.usage.outputTokens;
         }
+        const usage = (chunk?.data as any)?.usage;
         const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
         if (typeof cachedTokens === 'number') {
           this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
         }
 
-        const content = delta?.content;
+        const content = normalized.content;
         if (typeof content === 'string' && content.length > 0) {
           // Parse text-embedded tool call tokens before passing to stream processor
-          const { visibleText, newBuffer, newActive, toolCalls: embeddedCalls } = parseTextEmbeddedToolCalls(
+          const {
+            visibleText,
+            newBuffer,
+            newActive,
+            toolCalls: embeddedCalls,
+          } = parseTextEmbeddedToolCalls(
             content,
             this.textToolBuffer,
             this.textToolActive,
@@ -1337,9 +1502,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           }
         }
 
-        const reasoning = delta?.reasoning_content;
+        const reasoning = normalized.thinking;
         if (typeof reasoning === 'string' && reasoning.length > 0) {
-          streamProcessor.process({ thinking: reasoning });
+          // Accumulate reasoning_content for Preserved Thinking multi-turn support
+          this.accumulatedReasoningContent += reasoning;
+          // Log thinking content to output channel for user visibility
+          // (GLM models sometimes emit reasoning in reasoning_content field)
+          this.log.info(`[Z] Model reasoning: ${reasoning.slice(0, 200)}${reasoning.length > 200 ? '...' : ''}`);
+          // Emit reasoning_content as LanguageModelThinkingPart for UI rendering
+          progress.report(new LanguageModelThinkingPart(reasoning));
         }
 
         const toolCallDeltas = delta?.tool_calls;
@@ -1385,6 +1556,19 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             emittedToolCalls.add(tc.id);
             this.log.info(`[Z] tool call flushed: ${tc.name} (id=${vsCodeId})`);
           }
+        } else if (finishReason && finishReason !== 'stop' && finishReason !== 'tool_calls') {
+          // Handle non-standard finish_reason values
+          if (finishReason === 'length') {
+            this.log.warn('[Z] Response truncated due to length limit (finish_reason: length)');
+          } else if (finishReason === 'sensitive') {
+            this.log.warn('[Z] Response stopped due to content policy (finish_reason: sensitive)');
+          } else if (finishReason === 'model_context_window_exceeded') {
+            this.log.error('[Z] Model context window exceeded (finish_reason: model_context_window_exceeded)');
+          } else if (finishReason === 'network_error') {
+            this.log.error('[Z] Network error occurred (finish_reason: network_error)');
+          } else {
+            this.log.debug(`[Z] Unrecognized finish_reason: ${finishReason}`);
+          }
         }
       }
 
@@ -1422,10 +1606,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       this.reportUsageMetrics(progress);
     } catch (error) {
       // Classify errors as LanguageModelError subtypes for better VS Code UX
-      if (
-        token.isCancellationRequested ||
-        (error instanceof Error && error.name === 'AbortError')
-      ) {
+      if (token.isCancellationRequested || (error instanceof Error && error.name === 'AbortError')) {
         throw new (LanguageModelError as any)('Request cancelled', 'cancelled');
       }
 
@@ -1447,7 +1628,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       if (error instanceof LanguageModelError) throw error;
       throw new Error(errorMessage);
     } finally {
-      cancellationSubscription.dispose();
+      // no-op
     }
   }
 
@@ -1467,6 +1648,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const role = toZRole(msg.role);
       const textParts: string[] = [];
       const imageParts: Array<{ mimeType: string; data: Uint8Array }> = [];
+      const videoParts: Array<{ mimeType: string; data: Uint8Array }> = [];
+      const fileParts: Array<{ mimeType: string; data: Uint8Array }> = [];
       const toolCalls: ZToolCall[] = [];
       const toolResults: Array<{ callId: string; content: string }> = [];
 
@@ -1477,9 +1660,22 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }
 
         if (part instanceof LanguageModelDataPart) {
-          // Only handle images. For any other data parts, stringify as text.
+          // Handle different MIME types as appropriate chunks for multimodal messages
           if (part.mimeType?.startsWith('image/')) {
             imageParts.push({ mimeType: part.mimeType, data: part.data });
+          } else if (part.mimeType?.startsWith('video/')) {
+            videoParts.push({ mimeType: part.mimeType, data: part.data });
+          } else if (
+            part.mimeType === 'application/pdf' ||
+            part.mimeType === 'application/msword' ||
+            part.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            part.mimeType === 'application/vnd.ms-excel' ||
+            part.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+            part.mimeType === 'application/vnd.ms-powerpoint' ||
+            part.mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+            part.mimeType?.startsWith('text/')
+          ) {
+            fileParts.push({ mimeType: part.mimeType, data: part.data });
           } else {
             textParts.push(`[data:${part.mimeType}]`);
           }
@@ -1520,9 +1716,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             .filter(p => p instanceof LanguageModelTextPart)
             .map(p => (p as LanguageModelTextPart).value)
             .join('');
-          const truncatedResult = resultText && resultText.length > 0
-            ? ZChatModelProvider.truncateText(resultText, MAX_TOOL_RESULT_CHARS)
-            : ZChatModelProvider.truncateText(JSON.stringify(part.content), MAX_TOOL_RESULT_CHARS);
+          const truncatedResult =
+            resultText && resultText.length > 0
+              ? ZChatModelProvider.truncateText(resultText, MAX_TOOL_RESULT_CHARS)
+              : ZChatModelProvider.truncateText(JSON.stringify(part.content), MAX_TOOL_RESULT_CHARS);
           toolResults.push({
             callId: zId,
             content: truncatedResult,
@@ -1535,18 +1732,33 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const hasContent = content.length > 0;
       const hasToolCalls = toolCalls.length > 0;
       const hasImages = imageParts.length > 0;
+      const hasVideos = videoParts.length > 0;
+      const hasFiles = fileParts.length > 0;
 
-      const canSendImages = hasImages;
+      const canSendMultimodal = hasImages || hasVideos || hasFiles;
       let messageContent: ZMessage['content'] | undefined = undefined;
-      if (canSendImages) {
+      if (canSendMultimodal) {
         // Z expects a chunk-array for multimodal messages.
-        const chunks: Array<{ type: 'text'; text: string } | { type: 'image_url'; imageUrl: string }> = [];
+        const chunks: Array<
+          | { type: 'text'; text: string }
+          | { type: 'image_url'; imageUrl: string }
+          | { type: 'video_url'; videoUrl: string }
+          | { type: 'file_url'; fileUrl: string }
+        > = [];
         if (hasContent) {
           chunks.push({ type: 'text', text: content });
         }
         for (const img of imageParts) {
           const base64 = Buffer.from(img.data).toString('base64');
           chunks.push({ type: 'image_url', imageUrl: `data:${img.mimeType};base64,${base64}` });
+        }
+        for (const vid of videoParts) {
+          const base64 = Buffer.from(vid.data).toString('base64');
+          chunks.push({ type: 'video_url', videoUrl: `data:${vid.mimeType};base64,${base64}` });
+        }
+        for (const file of fileParts) {
+          const base64 = Buffer.from(file.data).toString('base64');
+          chunks.push({ type: 'file_url', fileUrl: `data:${file.mimeType};base64,${base64}` });
         }
         messageContent = chunks;
       } else if (hasContent) {
@@ -1562,6 +1774,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             // If this assistant message is only tool calls, prefer `null` content (matches SDK schema).
             content: messageContent ?? (hasToolCalls ? null : ''),
             tool_calls: hasToolCalls ? toolCalls : undefined,
+            // Include accumulated reasoning_content for Preserved Thinking multi-turn support
+            ...(this.accumulatedReasoningContent.length > 0 && { reasoning_content: this.accumulatedReasoningContent }),
           });
         }
       } else {

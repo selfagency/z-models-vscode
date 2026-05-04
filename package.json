@@ -1,7 +1,7 @@
 {
   "name": "z-models-vscode",
   "displayName": "Z.ai for Copilot",
-  "version": "0.1.7",
+  "version": "1.0.0",
   "description": "Access Z.ai (Zhipu) models within GitHub Copilot Chat",
   "categories": [
     "AI",
@@ -184,7 +184,8 @@
     ]
   },
   "dependencies": {
-    "@selfagency/llm-stream-parser": "^0.1.5",
+    "@agentsy/core": "^0.1.0",
+    "@agentsy/vscode": "^0.1.0",
     "got": "^15.0.3",
     "tiktoken": "^1.0.22"
   },

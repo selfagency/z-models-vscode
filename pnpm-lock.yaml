@@ -8,9 +8,12 @@ importers:
 
   .:
     dependencies:
-      '@selfagency/llm-stream-parser':
-        specifier: ^0.1.5
-        version: 0.1.5
+      '@agentsy/core':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@agentsy/vscode':
+        specifier: ^0.1.0
+        version: 0.1.0
       got:
         specifier: ^15.0.3
         version: 15.0.3
@@ -83,6 +86,12 @@ importers:
         version: 8.8.5
 
 packages:
+
+  '@agentsy/core@0.1.0':
+    resolution: {integrity: sha512-oZDMBSD4Ccty5+up5tupc9DczyqvvM2P8LCVjSX3VTIUc9PMmUTH2NDKKfCrfYKxBj0PYoX+5pw3F5b55Td9dw==}
+
+  '@agentsy/vscode@0.1.0':
+    resolution: {integrity: sha512-pZJ5fEb8Vha4QiIsV7c8UpIfb6BjgYVZUqPQAuWeEWR3bpaDitUUQz7ye+BaHgrA/Mv5R3dlR0gjFftn1hhTnw==}
 
   '@babel/helper-string-parser@7.27.1':
     resolution: {integrity: sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==}
@@ -755,9 +764,6 @@ packages:
 
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
-
-  '@selfagency/llm-stream-parser@0.1.5':
-    resolution: {integrity: sha512-bPRdv533AQUq2ZNo7MDbqBia1y0lKjP/YqxlozzDGo3svBLM2Ov4KnHGY0v3tfA9qXovWBjVn/G/AJZVa+eJ5A==}
 
   '@sindresorhus/is@8.0.0':
     resolution: {integrity: sha512-YvOsokBE5NsyHuXMnwEVB7lgFk6lX8F4OXCruYVgFII0hUHof0RGUvhMoabVt9hRqbg+qVzayzEG24RCcxcYeA==}
@@ -2623,6 +2629,10 @@ packages:
 
 snapshots:
 
+  '@agentsy/core@0.1.0': {}
+
+  '@agentsy/vscode@0.1.0': {}
+
   '@babel/helper-string-parser@7.27.1': {}
 
   '@babel/helper-validator-identifier@7.28.5': {}
@@ -3017,8 +3027,6 @@ snapshots:
     optional: true
 
   '@sec-ant/readable-stream@0.4.1': {}
-
-  '@selfagency/llm-stream-parser@0.1.5': {}
 
   '@sindresorhus/is@8.0.0': {}
 
