@@ -1,4 +1,5 @@
-import { LLMStreamProcessor } from '@agentsy/core/processor';
+import { normalizeZAiChunk } from '@agentsy/normalizers';
+import { LLMStreamProcessor } from '@agentsy/processor';
 import { cancellationTokenToAbortSignal, type ApiKeyManager } from '@agentsy/vscode';
 import got from 'got';
 import { randomUUID } from 'node:crypto';
@@ -25,7 +26,6 @@ import {
   workspace,
 } from 'vscode';
 import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
-import { normalizeZAiChunk } from './normalizers/z-ai.js';
 import { toZRole } from './role-utils.js';
 
 /**
@@ -264,15 +264,58 @@ function tryParseJson(text: string): Record<string, unknown> | undefined {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeZAiRawChunk(raw: unknown): unknown {
+  if (!isRecord(raw)) {
+    return raw;
+  }
+
+  const choices = Array.isArray(raw.choices)
+    ? raw.choices.map(choice => {
+        if (!isRecord(choice)) {
+          return choice;
+        }
+
+        const delta = isRecord(choice.delta) ? { ...choice.delta } : choice.delta;
+        if (isRecord(delta) && typeof delta.finishReason === 'string' && delta.finish_reason === undefined) {
+          delta.finish_reason = delta.finishReason;
+        }
+
+        const finish_reason =
+          typeof choice.finish_reason === 'string'
+            ? choice.finish_reason
+            : typeof choice.finishReason === 'string'
+              ? choice.finishReason
+              : undefined;
+
+        return {
+          ...choice,
+          ...(finish_reason !== undefined ? { finish_reason } : {}),
+          delta,
+        };
+      })
+    : raw.choices;
+
+  return {
+    ...raw,
+    choices,
+  };
+}
+
 /**
  * Message types for Z API
  */
-export type ZContent = string | Array<
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; imageUrl: string }
-  | { type: 'video_url'; videoUrl: string }
-  | { type: 'file_url'; fileUrl: string }
->;
+export type ZContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; imageUrl: string }
+      | { type: 'video_url'; videoUrl: string }
+      | { type: 'file_url'; fileUrl: string }
+    >;
 
 export type ZToolCall = {
   id: string;
@@ -509,7 +552,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       for (const part of msg.content) {
         if (part instanceof LanguageModelDataPart) {
           const mimeType = part.mimeType?.toLowerCase();
-          if (mimeType && documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(type.split('/')[0] + '/'))) {
+          if (
+            mimeType &&
+            documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(type.split('/')[0] + '/'))
+          ) {
             return true;
           }
         }
@@ -1452,14 +1498,26 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           break;
         }
 
-        const normalized = normalizeZAiChunk((chunk?.data as any) ?? {});
         const delta = chunk?.data?.choices?.[0]?.delta;
-        const finishReason = chunk?.data?.choices?.[0]?.finish_reason;
+        const rawFinishReason =
+          typeof chunk?.data?.choices?.[0]?.finish_reason === 'string'
+            ? chunk.data.choices[0].finish_reason
+            : typeof chunk?.data?.choices?.[0]?.finishReason === 'string'
+              ? chunk.data.choices[0].finishReason
+              : undefined;
+        const normalizedResult = normalizeZAiChunk(normalizeZAiRawChunk(chunk?.data ?? {}));
+        const normalized = normalizedResult?.chunk;
+
+        if (!normalized) {
+          continue;
+        }
 
         // Track usage metrics from streaming response
         if (normalized.usage) {
-          if (typeof normalized.usage.inputTokens === 'number') this.usageMetrics.promptTokens = normalized.usage.inputTokens;
-          if (typeof normalized.usage.outputTokens === 'number') this.usageMetrics.completionTokens = normalized.usage.outputTokens;
+          if (typeof normalized.usage.inputTokens === 'number')
+            this.usageMetrics.promptTokens = normalized.usage.inputTokens;
+          if (typeof normalized.usage.outputTokens === 'number')
+            this.usageMetrics.completionTokens = normalized.usage.outputTokens;
         }
         const usage = (chunk?.data as any)?.usage;
         const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
@@ -1486,7 +1544,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
           // Emit any visible text through the stream processor
           if (visibleText.length > 0) {
-            streamProcessor.process({ content: visibleText });
+            streamProcessor.process({
+              content: visibleText,
+              done: rawFinishReason === 'stop' || rawFinishReason === 'tool_calls',
+            });
           }
 
           // Emit any tool calls parsed from text-embedded tokens
@@ -1512,6 +1573,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           // Emit reasoning_content as LanguageModelThinkingPart for UI rendering
           progress.report(new LanguageModelThinkingPart(reasoning));
         }
+
+        const finishReason = rawFinishReason ?? normalized.finishReason;
 
         const toolCallDeltas = delta?.tool_calls;
         if (Array.isArray(toolCallDeltas)) {

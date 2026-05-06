@@ -184,8 +184,17 @@
     ]
   },
   "dependencies": {
-    "@agentsy/core": "^0.1.0",
-    "@agentsy/vscode": "^0.1.0",
+    "@agentsy/context": "^0.1.1",
+    "@agentsy/normalizers": "^0.1.2",
+    "@agentsy/formatting": "^0.1.1",
+    "@agentsy/processor": "^0.1.2",
+    "@agentsy/renderers": "^0.1.2",
+    "@agentsy/structured": "^0.1.2",
+    "@agentsy/thinking": "^0.1.1",
+    "@agentsy/tool-calls": "^0.1.2",
+    "@agentsy/types": "^0.1.1",
+    "@agentsy/xml-filter": "^0.1.1",
+    "@agentsy/vscode": "^0.1.1",
     "got": "^15.0.3",
     "tiktoken": "^1.0.22"
   },

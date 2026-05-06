@@ -8,12 +8,39 @@ importers:
 
   .:
     dependencies:
-      '@agentsy/core':
-        specifier: ^0.1.0
-        version: 0.1.0
+      '@agentsy/context':
+        specifier: ^0.1.1
+        version: 0.1.1
+      '@agentsy/formatting':
+        specifier: ^0.1.1
+        version: 0.1.1
+      '@agentsy/normalizers':
+        specifier: ^0.1.2
+        version: 0.1.2
+      '@agentsy/processor':
+        specifier: ^0.1.2
+        version: 0.1.2
+      '@agentsy/renderers':
+        specifier: ^0.1.2
+        version: 0.1.2
+      '@agentsy/structured':
+        specifier: ^0.1.2
+        version: 0.1.2
+      '@agentsy/thinking':
+        specifier: ^0.1.1
+        version: 0.1.1
+      '@agentsy/tool-calls':
+        specifier: ^0.1.2
+        version: 0.1.2
+      '@agentsy/types':
+        specifier: ^0.1.1
+        version: 0.1.1
       '@agentsy/vscode':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.1.1
+        version: 0.1.1
+      '@agentsy/xml-filter':
+        specifier: ^0.1.1
+        version: 0.1.1
       got:
         specifier: ^15.0.3
         version: 15.0.3
@@ -87,11 +114,38 @@ importers:
 
 packages:
 
-  '@agentsy/core@0.1.0':
-    resolution: {integrity: sha512-oZDMBSD4Ccty5+up5tupc9DczyqvvM2P8LCVjSX3VTIUc9PMmUTH2NDKKfCrfYKxBj0PYoX+5pw3F5b55Td9dw==}
+  '@agentsy/context@0.1.1':
+    resolution: {integrity: sha512-3Xu4haTfxuRx+1Zx4msdUB8NLFQLpX7HFcazSalj/DSjf8PeSr7hqkhuFwmvnyDqEelZY5tnk6atI1gbmD8/oA==}
 
-  '@agentsy/vscode@0.1.0':
-    resolution: {integrity: sha512-pZJ5fEb8Vha4QiIsV7c8UpIfb6BjgYVZUqPQAuWeEWR3bpaDitUUQz7ye+BaHgrA/Mv5R3dlR0gjFftn1hhTnw==}
+  '@agentsy/formatting@0.1.1':
+    resolution: {integrity: sha512-/XUvydNMdoEUq7L5lzWBRtbi2Fm6pinS2fwNWFAjoYaA7UyXb1PaKUVPlaFOQEX9bEtNhJWyWO6lWLmGTlHwvw==}
+
+  '@agentsy/normalizers@0.1.2':
+    resolution: {integrity: sha512-UZHCYnBRfCKoE/bUAWwxLlOgiJUi+HXlOTGt3ek9R9f1HeonlmhhdRt6pUYhUaiP9cVo3kU9wNaWs+5rmZCx6A==}
+
+  '@agentsy/processor@0.1.2':
+    resolution: {integrity: sha512-WOS6RhHRL0QSFV3FIH+u9SzVXEzd+byoA6XzHc3DYWDCEXBQMWES3v0V4KSXaEH3HQ4YT3ZQ5ZQorYpJAgLg8Q==}
+
+  '@agentsy/renderers@0.1.2':
+    resolution: {integrity: sha512-mLxsqJaatHMJPkl9WrVXGHpuazVYpYiO2ihic1wgWnBpDNG1SNjCmNEkkIYLOxO6kxMpPNtAXk6fJkm1BOq4Iw==}
+
+  '@agentsy/structured@0.1.2':
+    resolution: {integrity: sha512-4PMhsOZh+cq00lbIofRrGDwi1mglfUgXArPzQIbd+J5qbs3nuEDsNPk5N/npU1qgHbRFvybBMZnvh78nsqmDIA==}
+
+  '@agentsy/thinking@0.1.1':
+    resolution: {integrity: sha512-vAhopJ9819N0w7VSZP2ROL+j9LFv8wkb+K4twyx769WF+ebPVp/V3cb45FwLUvUOov9uTMc4sscfbAQ3FUtQJA==}
+
+  '@agentsy/tool-calls@0.1.2':
+    resolution: {integrity: sha512-0PPYqsjR0lmECFZl7KAc+Wk2+hQTqvfV9wSaLAPdFuOPsrktpvvVfrnkENkADou7wpBqoXmR+Q5VtTNZBPzGfA==}
+
+  '@agentsy/types@0.1.1':
+    resolution: {integrity: sha512-8ymXAbdiiV5XDV8ahszd99xg7fbgjmWSXzx6Y1lbhickrKSgPb5Db2rlzbDdIRxDrCOouJxW32XwskNxZP253Q==}
+
+  '@agentsy/vscode@0.1.1':
+    resolution: {integrity: sha512-emyP2GDl2hUOD3ELqFdOkYt6MYN3Zr3yBrYCeA2WIY0GbDvzbvCTrOdiEY4GGTBvlZnx26vym9cJbyZgiGaTaQ==}
+
+  '@agentsy/xml-filter@0.1.1':
+    resolution: {integrity: sha512-6go9dKYBi/EQYPOfIKp1SOWQlvim1SONFK5Q2UUpgF5XW3murulCjl5Voc7sxRMPrXGEnFLhgBPhn68ZXzO3cA==}
 
   '@babel/helper-string-parser@7.27.1':
     resolution: {integrity: sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==}
@@ -2629,9 +2683,27 @@ packages:
 
 snapshots:
 
-  '@agentsy/core@0.1.0': {}
+  '@agentsy/context@0.1.1': {}
 
-  '@agentsy/vscode@0.1.0': {}
+  '@agentsy/formatting@0.1.1': {}
+
+  '@agentsy/normalizers@0.1.2': {}
+
+  '@agentsy/processor@0.1.2': {}
+
+  '@agentsy/renderers@0.1.2': {}
+
+  '@agentsy/structured@0.1.2': {}
+
+  '@agentsy/thinking@0.1.1': {}
+
+  '@agentsy/tool-calls@0.1.2': {}
+
+  '@agentsy/types@0.1.1': {}
+
+  '@agentsy/vscode@0.1.1': {}
+
+  '@agentsy/xml-filter@0.1.1': {}
 
   '@babel/helper-string-parser@7.27.1': {}
 
