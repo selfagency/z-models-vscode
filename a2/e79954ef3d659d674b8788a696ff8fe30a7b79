@@ -1,0 +1,21 @@
+src/provider.ts
+  s_45a260a096835b::t_e067dda891b36b 599,699,1000,1607,1647-1649,1652-1653,2126,2128,2136
+src/provider.test.ts
+  s_45a260a096835b::t_50715eb5d0414a 677
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "a2e79954ef3d659d674b8788a696ff8fe30a7b79",
+  "prompts": {},
+  "sessions": {
+    "s_45a260a096835b": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "c02ceecb-d5d7-4d16-afdf-717509aa6149",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Sieradski <2541728+selfagency@users.noreply.github.com>"
+    }
+  }
+}
