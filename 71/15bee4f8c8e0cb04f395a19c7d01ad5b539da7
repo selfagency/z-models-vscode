@@ -1,0 +1,51 @@
+src/provider.ts
+  h_627b419bd8fa0f 2,1622-1625,1627-1630
+test/integration/core-functionality.test.js
+  s_45a260a096835b::t_adc1095014aa8d 52-61
+  s_45a260a096835b::t_0f29470c830ba7 82,98
+  s_45a260a096835b::t_d9a9bcbaedbeab 71-78
+  s_45a260a096835b::t_df61d28da9e421 91-94,110-113
+  s_45a260a096835b::t_5d6ac41d6edf24 18
+  s_45a260a096835b::t_b8f8fb32b8ff10 64-68
+vitest.integration.config.js
+  s_45a260a096835b::t_3590ca50ec6f80 1-19
+test/integration/run-integration-tests.js
+  s_45a260a096835b::t_cbcf5f19531710 1-11,13-17,19-24
+  s_45a260a096835b::t_02a4ff3e759d3e 12
+  h_627b419bd8fa0f 18
+plans/agentsy-adoption-plan.md
+  h_627b419bd8fa0f 32,51
+plans/remediation-plan.md
+  s_45a260a096835b::t_f53bb1baed9705 71-73,75,79,550-554,560-566,572,574-575,581-583
+  h_5cf1e2c1161853 515,517-518,520,539,541-544,548,558,570,579,600-603
+  s_45a260a096835b::t_b43e5ccc3142cb 573
+  h_627b419bd8fa0f 40,68,105,228,254,456,516,540,549,559,571,580,590
+  s_45a260a096835b::t_f3ab20f0fac50a 519,521-525
+  s_45a260a096835b::t_c58a43c965d071 67,69-70,74,76-78,80-81
+src/mcp-server-definition-provider.ts
+  h_627b419bd8fa0f 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "7115bee4f8c8e0cb04f395a19c7d01ad5b539da7",
+  "prompts": {},
+  "humans": {
+    "h_5cf1e2c1161853": {
+      "author": "Daniel Sieradski"
+    },
+    "h_627b419bd8fa0f": {
+      "author": "Daniel Sieradski <2541728+selfagency@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_45a260a096835b": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "c02ceecb-d5d7-4d16-afdf-717509aa6149",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Sieradski <2541728+selfagency@users.noreply.github.com>"
+    }
+  }
+}
