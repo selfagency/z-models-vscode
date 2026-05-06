@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
 import {
   createMcpServerDefinitionProvider,
   McpServerRegistry,
   type ApiKeyManager,
   type McpServerProvider,
 } from '@agentsy/vscode';
+import * as vscode from 'vscode';
 
 const MCP_URLS = {
   search: 'https://api.z.ai/api/mcp/web_search_prime/mcp',

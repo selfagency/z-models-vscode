@@ -37,7 +37,7 @@ This revision reconciles prior planning artifacts and is now the canonical sourc
 - H-03: Added 13 missing GLM model token limits (glm-4.5 series, glm-4.6V variants, etc.)
 - H-06: Smart-defaulted `clear_thinking` based on endpoint type
 
-**@agentsy/* Integration:**
+**@agentsy/\* Integration:**
 The current codebase uses focused packages (`@agentsy/vscode`, `@agentsy/processor`, `@agentsy/normalizers`, etc.) rather than the legacy monolith. `@agentsy/vscode` is the flagship integration package; it already includes its own chat renderer, agent loop, provider base class, API-key/settings helpers, usage helpers, and MCP helpers. Current guidance recommends the smallest package set per feature, but a full Agentsy implementation should still make deliberate use of adapters and agent loops where they replace bespoke glue:
 
 **Streaming & Rendering:**
@@ -64,21 +64,21 @@ For the current extension, `createVSCodeAgentLoop()` from `@agentsy/vscode` is t
 
 The full published Agentsy package surface has now been reviewed against the repo:
 
-| Package | Status | Current role in this repo | Next step |
-|---|---|---|---|
-| `@agentsy/vscode` | Complete / primary | API key management, cancellation helpers, usage helpers, MCP helpers, VS Code chat rendering | Keep as the integration boundary; consider `BaseLanguageModelChatProvider` only if we want to standardize the shell further. |
-| `@agentsy/normalizers` | Complete | Z.ai stream normalization | Keep as-is. |
-| `@agentsy/processor` | Complete (via adapters) | Orchestration layer used through adapter callbacks | Keep this layered usage; only move to direct processor wiring if extra low-level hooks are needed. |
-| `@agentsy/adapters` | Complete | `createGenericAdapter` used directly in provider streaming | Keep as provider-facing glue boundary; not Z.ai-specific. |
-| `@agentsy/tool-calls` | Partial | Indirect via adapters/processor; no direct helper usage yet | Adopt direct helper APIs (`ToolCallAccumulator`, `buildToolResultMessage`) if we want to remove custom tool-call state next. |
-| `@agentsy/structured` | Not yet adopted | JSON repair / validation candidate | Adopt only if it replaces local parsing/repair logic cleanly. |
-| `@agentsy/thinking` | Indirect | Used through processor/adapters parsing stack | Keep indirect usage unless a direct parser API is needed for bespoke flows. |
-| `@agentsy/formatting` | Indirect | Covered through `@agentsy/vscode` internals | No direct action needed unless custom rendering returns. |
-| `@agentsy/renderers` | Indirect | Covered through `@agentsy/vscode` internals | No direct action needed unless custom rendering returns. |
-| `@agentsy/context` | Deferred | Not required yet | Hold unless prompt-context tag management becomes a feature. |
-| `@agentsy/agent` | Partial (via VS Code wrapper) | Agent-loop behavior is used through `createVSCodeAgentLoop` | Adopt lower-level `createAgentLoop` directly only if/when we need custom multi-step orchestration beyond VS Code wrapper needs. |
-| `@agentsy/ui` | Deferred | Not required yet | Hold unless we add conversation-store-driven UI. |
-| `@agentsy/ag-ui` | Deferred | Not required yet | Hold; not needed for the current VS Code extension. |
+| Package                | Status                        | Current role in this repo                                                                    | Next step                                                                                                                       |
+| ---------------------- | ----------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `@agentsy/vscode`      | Complete / primary            | API key management, cancellation helpers, usage helpers, MCP helpers, VS Code chat rendering | Keep as the integration boundary; consider `BaseLanguageModelChatProvider` only if we want to standardize the shell further.    |
+| `@agentsy/normalizers` | Complete                      | Z.ai stream normalization                                                                    | Keep as-is.                                                                                                                     |
+| `@agentsy/processor`   | Complete (via adapters)       | Orchestration layer used through adapter callbacks                                           | Keep this layered usage; only move to direct processor wiring if extra low-level hooks are needed.                              |
+| `@agentsy/adapters`    | Complete                      | `createGenericAdapter` used directly in provider streaming                                   | Keep as provider-facing glue boundary; not Z.ai-specific.                                                                       |
+| `@agentsy/tool-calls`  | Partial                       | Indirect via adapters/processor; no direct helper usage yet                                  | Adopt direct helper APIs (`ToolCallAccumulator`, `buildToolResultMessage`) if we want to remove custom tool-call state next.    |
+| `@agentsy/structured`  | Not yet adopted               | JSON repair / validation candidate                                                           | Adopt only if it replaces local parsing/repair logic cleanly.                                                                   |
+| `@agentsy/thinking`    | Indirect                      | Used through processor/adapters parsing stack                                                | Keep indirect usage unless a direct parser API is needed for bespoke flows.                                                     |
+| `@agentsy/formatting`  | Indirect                      | Covered through `@agentsy/vscode` internals                                                  | No direct action needed unless custom rendering returns.                                                                        |
+| `@agentsy/renderers`   | Indirect                      | Covered through `@agentsy/vscode` internals                                                  | No direct action needed unless custom rendering returns.                                                                        |
+| `@agentsy/context`     | Deferred                      | Not required yet                                                                             | Hold unless prompt-context tag management becomes a feature.                                                                    |
+| `@agentsy/agent`       | Partial (via VS Code wrapper) | Agent-loop behavior is used through `createVSCodeAgentLoop`                                  | Adopt lower-level `createAgentLoop` directly only if/when we need custom multi-step orchestration beyond VS Code wrapper needs. |
+| `@agentsy/ui`          | Deferred                      | Not required yet                                                                             | Hold unless we add conversation-store-driven UI.                                                                                |
+| `@agentsy/ag-ui`       | Deferred                      | Not required yet                                                                             | Hold; not needed for the current VS Code extension.                                                                             |
 
 For the full adoption breakdown, see [`plans/agentsy-adoption-plan.md`](./agentsy-adoption-plan.md).
 
@@ -102,7 +102,7 @@ will result in a 422 validation error from the API, silently disabling web searc
 ```yaml
 search_engine:
   type: string
-  description: "Type of search engine. Default is `search_pro_jina`. Supports: `search_pro_jina`."
+  description: 'Type of search engine. Default is `search_pro_jina`. Supports: `search_pro_jina`.'
   enum:
     - search_pro_jina
   required: true
@@ -113,7 +113,7 @@ search_engine:
 ```typescript
 const webSearchConfig = {
   enable: true,
-  search_engine: 'search-prime',  // ← INVALID
+  search_engine: 'search-prime', // ← INVALID
   search_result: true,
 };
 ```
@@ -179,9 +179,9 @@ when tighter control is needed.
 import { createVSCodeChatRenderer } from '@agentsy/vscode';
 
 const renderer = createVSCodeChatRenderer({
-  stream,  // ChatResponseStream from VS Code
+  stream, // ChatResponseStream from VS Code
   showThinking: true,
-  thinkingStyle: 'progress',  // 'blockquote' or 'progress'
+  thinkingStyle: 'progress', // 'blockquote' or 'progress'
 });
 
 await renderer.write(content);
@@ -225,7 +225,7 @@ the renderer abstracts most proposed API type handling. If manually managing pro
 the signature to:
 
 ```typescript
-Progress<LanguageModelResponsePart | LanguageModelThinkingPart | LanguageModelDataPart>
+Progress<LanguageModelResponsePart | LanguageModelThinkingPart | LanguageModelDataPart>;
 ```
 
 Or use a conditional type alias for backwards compatibility:
@@ -250,21 +250,21 @@ falls back to `KNOWN_MODEL_TOKEN_LIMITS`. For uncatalogued models this silently 
 
 **Models missing from current table (per Z.ai API spec):**
 
-| Model ID | Max Output Tokens | Max Input Tokens |
-|---|---|---|
-| `glm-4.5` | 96,000 | 200,000 |
-| `glm-4.5-air` | 96,000 | 200,000 |
-| `glm-4.5-x` | 96,000 | 200,000 |
-| `glm-4.5-airx` | 96,000 | 200,000 |
-| `glm-4.5-flash` | 96,000 | 200,000 |
-| `glm-4.5v` | 16,000 | 8,000 |
-| `glm-4.6v` | 32,000 | 128,000 |
-| `glm-4.6v-flash` | 32,000 | 128,000 |
-| `glm-4.6v-flashx` | 32,000 | 128,000 |
-| `glm-4.7-flash` | 128,000 | 200,000 |
-| `glm-4.7-flashx` | 128,000 | 200,000 |
-| `glm-4-32b-0414-128k` | 16,000 | 128,000 |
-| `autoglm-phone-multilingual` | 4,000 | 64,000 |
+| Model ID                     | Max Output Tokens | Max Input Tokens |
+| ---------------------------- | ----------------- | ---------------- |
+| `glm-4.5`                    | 96,000            | 200,000          |
+| `glm-4.5-air`                | 96,000            | 200,000          |
+| `glm-4.5-x`                  | 96,000            | 200,000          |
+| `glm-4.5-airx`               | 96,000            | 200,000          |
+| `glm-4.5-flash`              | 96,000            | 200,000          |
+| `glm-4.5v`                   | 16,000            | 8,000            |
+| `glm-4.6v`                   | 32,000            | 128,000          |
+| `glm-4.6v-flash`             | 32,000            | 128,000          |
+| `glm-4.6v-flashx`            | 32,000            | 128,000          |
+| `glm-4.7-flash`              | 128,000           | 200,000          |
+| `glm-4.7-flashx`             | 128,000           | 200,000          |
+| `glm-4-32b-0414-128k`        | 16,000            | 128,000          |
+| `autoglm-phone-multilingual` | 4,000             | 64,000           |
 
 **Fix:** Add all rows above to `KNOWN_MODEL_TOKEN_LIMITS`.
 
@@ -453,7 +453,7 @@ body when provided. Document the 6–128 char requirement and the prohibition on
 
 **File:** `src/provider.ts` — `toZMessages()`, line ~1490
 **Impact:** Z.ai Interleaved Thinking docs show that when thinking precedes a tool call, the
-`reasoning_content` block must appear *in the same assistant message* as `tool_calls` when sending
+`reasoning_content` block must appear _in the same assistant message_ as `tool_calls` when sending
 history. Currently assistant messages with `tool_calls` never carry `reasoning_content`. This is a
 specific variant of C-02 that impacts multi-turn tool-use scenarios with thinking-enabled models.
 
@@ -512,17 +512,17 @@ it from the `/models` API response. Either way, add an explicit comment.
 The older `plans/upgrade.plan.md` remains useful for sequencing but is no longer the canonical source.
 Its open items are mapped below to this remediation register.
 
-| Upgrade Item | Carryover ID | Remediation Mapping | Status | Notes |
-|---|---|---|---|---|
-| Add abort signal support in model listing | UP-01 | Existing cancellation workstream (Phase 2 hardening) | Open | Keep explicit validation for list cancellation path. |
-| Fetch token limits from API with fallback | UP-02 | H-03 | Done | Completed in Phase 1; keep regression test coverage. |
-| Replace custom tool-call parser with processor | UP-03 | H-01, C-02, L-01 | Done | Provider stream path now runs through adapters/processor boundary with passing regression tests. |
-| Add ChatResponseTurn2 compatibility | UP-04 | L-03 | Open | Track as proposed API compatibility enhancement. |
-| Use secure random UUID IDs | UP-05 | M-01 | Done | `request_id` now generated and logged per request. |
-| Use Z.ai tokenizer API (fallback to tiktoken) | UP-06 | M-04 | Done | Implemented with model-aware capability cache and fallback path. |
-| Add user warning for MCP on older VS Code | UP-07 | L-04 | Done | MCP header alignment complete; compatibility messaging can remain follow-up polish. |
-| Expand streaming/tool-call tests | UP-08 | C-02, H-01, M-02, L-01 | Done | Regression tests now cover these flows and pass. |
-| Release readiness checks (`test`, typecheck, lint) | UP-09 | Phase-gate verification | Done | All checks pass locally in current branch. |
+| Upgrade Item                                       | Carryover ID | Remediation Mapping                                  | Status | Notes                                                                                            |
+| -------------------------------------------------- | ------------ | ---------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| Add abort signal support in model listing          | UP-01        | Existing cancellation workstream (Phase 2 hardening) | Open   | Keep explicit validation for list cancellation path.                                             |
+| Fetch token limits from API with fallback          | UP-02        | H-03                                                 | Done   | Completed in Phase 1; keep regression test coverage.                                             |
+| Replace custom tool-call parser with processor     | UP-03        | H-01, C-02, L-01                                     | Done   | Provider stream path now runs through adapters/processor boundary with passing regression tests. |
+| Add ChatResponseTurn2 compatibility                | UP-04        | L-03                                                 | Open   | Track as proposed API compatibility enhancement.                                                 |
+| Use secure random UUID IDs                         | UP-05        | M-01                                                 | Done   | `request_id` now generated and logged per request.                                               |
+| Use Z.ai tokenizer API (fallback to tiktoken)      | UP-06        | M-04                                                 | Done   | Implemented with model-aware capability cache and fallback path.                                 |
+| Add user warning for MCP on older VS Code          | UP-07        | L-04                                                 | Done   | MCP header alignment complete; compatibility messaging can remain follow-up polish.              |
+| Expand streaming/tool-call tests                   | UP-08        | C-02, H-01, M-02, L-01                               | Done   | Regression tests now cover these flows and pass.                                                 |
+| Release readiness checks (`test`, typecheck, lint) | UP-09        | Phase-gate verification                              | Done   | All checks pass locally in current branch.                                                       |
 
 ### Superseded from `upgrade.plan.md`
 
@@ -536,71 +536,71 @@ Its open items are mapped below to this remediation register.
 
 ### Phase 1 — Immediate (before next tag)
 
-| ID | Title | Effort | Status |
-|---|---|---|---|
-| C-01 | Fix `search_engine` from `'search-prime'` to `'search_pro_jina'` | 15 min | Done |
-| H-04 | Add `Accept-Language: en-US,en` header | 10 min | Done |
-| H-03 | Add missing model token limits | 30 min | Done |
-| H-06 | Smart-default `clear_thinking` on coding endpoint | 1 hr | Done |
+| ID   | Title                                                            | Effort | Status |
+| ---- | ---------------------------------------------------------------- | ------ | ------ |
+| C-01 | Fix `search_engine` from `'search-prime'` to `'search_pro_jina'` | 15 min | Done   |
+| H-04 | Add `Accept-Language: en-US,en` header                           | 10 min | Done   |
+| H-03 | Add missing model token limits                                   | 30 min | Done   |
+| H-06 | Smart-default `clear_thinking` on coding endpoint                | 1 hr   | Done   |
 
 ### Phase 2 — High priority (current sprint)
 
-| ID | Title | Effort | Status |
-|---|---|---|---|
-| C-02 | Preserve `reasoning_content` in assistant history | 3 hr | Done |
-| H-01 | Emit `LanguageModelThinkingPart` via `progress.report()` | 2 hr | Done |
-| H-02 | Update progress type to include `LanguageModelThinkingPart` | 1 hr | Done |
-| H-05 | Handle `video_url` and `file_url` multimodal content | 2 hr | Done |
-| M-02 | Handle non-standard `finish_reason` values | 1 hr | Done |
+| ID   | Title                                                       | Effort | Status |
+| ---- | ----------------------------------------------------------- | ------ | ------ |
+| C-02 | Preserve `reasoning_content` in assistant history           | 3 hr   | Done   |
+| H-01 | Emit `LanguageModelThinkingPart` via `progress.report()`    | 2 hr   | Done   |
+| H-02 | Update progress type to include `LanguageModelThinkingPart` | 1 hr   | Done   |
+| H-05 | Handle `video_url` and `file_url` multimodal content        | 2 hr   | Done   |
+| M-02 | Handle non-standard `finish_reason` values                  | 1 hr   | Done   |
 
 ### Phase 3 — Medium priority (next sprint)
 
-| ID | Title | Effort | Status |
-|---|---|---|---|
-| M-03 | Reflect compulsory-thinking models in request logic | 1 hr | Done |
-| M-04 | Use Z.ai Tokenizer API with tiktoken fallback | 3 hr | Done |
-| M-01 | Add `request_id` per-request | 30 min | Done |
-| M-05 | Expose `do_sample` parameter | 30 min | Done |
-| M-06 | Expose `stop` parameter | 30 min | Done |
-| M-07 | Expose `user_id` parameter | 30 min | Done |
-| L-01 | Preserve `reasoning_content` alongside tool calls in history | 2 hr | Done |
+| ID   | Title                                                        | Effort | Status |
+| ---- | ------------------------------------------------------------ | ------ | ------ |
+| M-03 | Reflect compulsory-thinking models in request logic          | 1 hr   | Done   |
+| M-04 | Use Z.ai Tokenizer API with tiktoken fallback                | 3 hr   | Done   |
+| M-01 | Add `request_id` per-request                                 | 30 min | Done   |
+| M-05 | Expose `do_sample` parameter                                 | 30 min | Done   |
+| M-06 | Expose `stop` parameter                                      | 30 min | Done   |
+| M-07 | Expose `user_id` parameter                                   | 30 min | Done   |
+| L-01 | Preserve `reasoning_content` alongside tool calls in history | 2 hr   | Done   |
 
 ### Phase 4 — Low / polish
 
-| ID | Title | Effort | Status |
-|---|---|---|---|
-| L-02 | Surface `cachedTokens` in usage data part | 30 min | Done |
-| L-03 | Add `LanguageModelChatMessage2` feature-detect | 1 hr | Done |
-| L-04 | Add `Accept-Language` to MCP HTTP headers | 10 min | Done |
-| L-05 | Clarify `top_p` default handling | 30 min | Done |
+| ID   | Title                                          | Effort | Status |
+| ---- | ---------------------------------------------- | ------ | ------ |
+| L-02 | Surface `cachedTokens` in usage data part      | 30 min | Done   |
+| L-03 | Add `LanguageModelChatMessage2` feature-detect | 1 hr   | Done   |
+| L-04 | Add `Accept-Language` to MCP HTTP headers      | 10 min | Done   |
+| L-05 | Clarify `top_p` default handling               | 30 min | Done   |
 
 ### Phase-gate verification (release carryover)
 
-| Carryover ID | Gate | Status |
-|---|---|---|
-| UP-09 | `pnpm test` passes | Done |
-| UP-09 | Type-check passes | Done |
-| UP-09 | Lint passes | Done |
+| Carryover ID | Gate               | Status |
+| ------------ | ------------------ | ------ |
+| UP-09        | `pnpm test` passes | Done   |
+| UP-09        | Type-check passes  | Done   |
+| UP-09        | Lint passes        | Done   |
 
 ---
 
 ## Verification Matrix by Issue ID (including carryover)
 
-| Fix | New Tests Required |
-|---|---|
-| C-01 | `parseModelOptions` with `webSearch: true` produces `search_engine: 'search_pro_jina'` |
-| C-02 | `toZMessages` includes `reasoning_content` on assistant messages when `clear_thinking: false` |
-| H-01 | `provideLanguageModelChatResponse` calls `progress.report` with `LanguageModelThinkingPart` delta |
-| H-03 | `getKnownTokenLimits('glm-4.5')` returns `{ maxOutputTokens: 96000 }` |
-| H-04 | HTTP client default headers include `Accept-Language: en-US,en` |
-| H-05 | Video MIME type in `LanguageModelDataPart` produces `video_url` content chunk in `toZMessages` |
-| H-06 | Coding endpoint URL causes `clear_thinking` to default to `false` |
-| M-02 | `finish_reason: 'model_context_window_exceeded'` in stream throws `LanguageModelError` |
-| M-04 | Token count uses Z.ai Tokenizer API for `glm-4.6`; falls back to tiktoken for unsupported models |
-| UP-01 | Cancel model list request mid-fetch and assert HTTP request abort occurs |
-| UP-04 | Conversation history conversion handles both legacy and newer VS Code turn structures |
-| UP-08 | Tool call streaming regression suite covers partial JSON, deduplication, and malformed chunks |
-| UP-09 | CI gate job runs test + type-check + lint as release precondition |
+| Fix   | New Tests Required                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------- |
+| C-01  | `parseModelOptions` with `webSearch: true` produces `search_engine: 'search_pro_jina'`            |
+| C-02  | `toZMessages` includes `reasoning_content` on assistant messages when `clear_thinking: false`     |
+| H-01  | `provideLanguageModelChatResponse` calls `progress.report` with `LanguageModelThinkingPart` delta |
+| H-03  | `getKnownTokenLimits('glm-4.5')` returns `{ maxOutputTokens: 96000 }`                             |
+| H-04  | HTTP client default headers include `Accept-Language: en-US,en`                                   |
+| H-05  | Video MIME type in `LanguageModelDataPart` produces `video_url` content chunk in `toZMessages`    |
+| H-06  | Coding endpoint URL causes `clear_thinking` to default to `false`                                 |
+| M-02  | `finish_reason: 'model_context_window_exceeded'` in stream throws `LanguageModelError`            |
+| M-04  | Token count uses Z.ai Tokenizer API for `glm-4.6`; falls back to tiktoken for unsupported models  |
+| UP-01 | Cancel model list request mid-fetch and assert HTTP request abort occurs                          |
+| UP-04 | Conversation history conversion handles both legacy and newer VS Code turn structures             |
+| UP-08 | Tool call streaming regression suite covers partial JSON, deduplication, and malformed chunks     |
+| UP-09 | CI gate job runs test + type-check + lint as release precondition                                 |
 
 ---
 

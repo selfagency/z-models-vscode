@@ -1,5 +1,5 @@
-import { normalizeZAiChunk } from '@agentsy/normalizers';
 import { createGenericAdapter } from '@agentsy/adapters';
+import { normalizeZAiChunk } from '@agentsy/normalizers';
 import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/tool-calls';
 import {
   calculateRetryDelay,
@@ -1612,21 +1612,24 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         abortSignal,
       });
 
-      const streamAdapter = createGenericAdapter({
-        onThinking: async (text: string) => {
-          this.log.debug('[Z] parsed <think> delta length: ' + text.length);
+      const streamAdapter = createGenericAdapter(
+        {
+          onThinking: async (text: string) => {
+            this.log.debug('[Z] parsed <think> delta length: ' + text.length);
+          },
+          onContent: async (text: string) => {
+            await loopRenderer.write(text);
+          },
+          onError: (error: Error, context: { type: string; chunk?: unknown }) => {
+            this.log.warn(`[Z] adapter callback error (${context.type}): ${String(error)}`);
+          },
         },
-        onContent: async (text: string) => {
-          await loopRenderer.write(text);
+        {
+          parseThinkTags: true,
+          scrubContextTags: true,
+          enforcePrivacyTags: true,
         },
-        onError: (error: Error, context: { type: string; chunk?: unknown }) => {
-          this.log.warn(`[Z] adapter callback error (${context.type}): ${String(error)}`);
-        },
-      }, {
-        parseThinkTags: true,
-        scrubContextTags: true,
-        enforcePrivacyTags: true,
-      });
+      );
 
       for await (const chunk of streamResult) {
         if (token.isCancellationRequested) {
