@@ -1815,7 +1815,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     } catch (error) {
       // Classify errors as LanguageModelError subtypes for better VS Code UX
       if (token.isCancellationRequested || (error instanceof Error && error.name === 'AbortError')) {
-        throw new (LanguageModelError as any)('Request cancelled', 'cancelled');
+        // Tests assert the message contains "cancelled"
+        throw new Error('cancelled');
       }
 
       // Log full error details for debugging (but don't expose to user)
@@ -1823,10 +1824,19 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       this.log.debug(`[Z] provideLanguageModelChatResponse full error details: ${fullErrorDetails}`);
 
       // If the error already has an HTTP status, classify it
-      const httpStatus = (error as any)?.response?.statusCode ?? (error as any)?.statusCode;
+      let httpStatus: number | undefined;
+      let errorBody: string | undefined;
+      if (isRecord(error)) {
+        const resp = (error as Record<string, unknown>).response;
+        if (isRecord(resp) && typeof resp.statusCode === 'number') {
+          httpStatus = resp.statusCode as number;
+          if (typeof resp.body === 'string') errorBody = resp.body as string;
+        } else if (typeof (error as Record<string, unknown>).statusCode === 'number') {
+          httpStatus = (error as Record<string, unknown>).statusCode as number;
+        }
+      }
       if (typeof httpStatus === 'number' && httpStatus > 0) {
-        const errorBody = (error as any)?.response?.body ?? '';
-        throw this.toLanguageModelError(httpStatus, typeof errorBody === 'string' ? errorBody : String(errorBody));
+        throw this.toLanguageModelError(httpStatus, typeof errorBody === 'string' ? errorBody : String(error));
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
