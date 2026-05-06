@@ -1,5 +1,4 @@
-'use strict';
-const assert = require('assert');
+const assert = require('node:assert');
 
 suite('Core Functionality Tests', () => {
   // Test 1: Verify UsageService data structure
@@ -49,33 +48,33 @@ suite('Core Functionality Tests', () => {
     };
 
     // Verify the structure matches our expectations
-    assert.ok(mockUsageData.hasOwnProperty('tokenQuotas'));
-    assert.ok(mockUsageData.hasOwnProperty('timeLimits'));
-    assert.ok(mockUsageData.hasOwnProperty('todayPrompts'));
-    assert.ok(mockUsageData.hasOwnProperty('todayTokens'));
-    assert.ok(mockUsageData.hasOwnProperty('sevenDayPrompts'));
-    assert.ok(mockUsageData.hasOwnProperty('sevenDayTokens'));
-    assert.ok(mockUsageData.hasOwnProperty('thirtyDayPrompts'));
-    assert.ok(mockUsageData.hasOwnProperty('thirtyDayTokens'));
-    assert.ok(mockUsageData.hasOwnProperty('lastUpdated'));
-    assert.ok(mockUsageData.hasOwnProperty('connectionStatus'));
+    assert.ok('tokenQuotas' in mockUsageData);
+    assert.ok('timeLimits' in mockUsageData);
+    assert.ok('todayPrompts' in mockUsageData);
+    assert.ok('todayTokens' in mockUsageData);
+    assert.ok('sevenDayPrompts' in mockUsageData);
+    assert.ok('sevenDayTokens' in mockUsageData);
+    assert.ok('thirtyDayPrompts' in mockUsageData);
+    assert.ok('thirtyDayTokens' in mockUsageData);
+    assert.ok('lastUpdated' in mockUsageData);
+    assert.ok('connectionStatus' in mockUsageData);
 
     // Verify token quota structure
-    assert.ok(mockUsageData.tokenQuotas[0].hasOwnProperty('windowName'));
-    assert.ok(mockUsageData.tokenQuotas[0].hasOwnProperty('unit'));
-    assert.ok(mockUsageData.tokenQuotas[0].hasOwnProperty('number'));
-    assert.ok(mockUsageData.tokenQuotas[0].hasOwnProperty('percentage'));
-    assert.ok(mockUsageData.tokenQuotas[0].hasOwnProperty('nextResetTime'));
+    assert.ok('windowName' in mockUsageData.tokenQuotas[0]);
+    assert.ok('unit' in mockUsageData.tokenQuotas[0]);
+    assert.ok('number' in mockUsageData.tokenQuotas[0]);
+    assert.ok('percentage' in mockUsageData.tokenQuotas[0]);
+    assert.ok('nextResetTime' in mockUsageData.tokenQuotas[0]);
 
     // Verify time limit structure
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('windowName'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('unit'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('number'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('percentage'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('usage'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('currentValue'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('remaining'));
-    assert.ok(mockUsageData.timeLimits[0].hasOwnProperty('nextResetTime'));
+    assert.ok('windowName' in mockUsageData.timeLimits[0]);
+    assert.ok('unit' in mockUsageData.timeLimits[0]);
+    assert.ok('number' in mockUsageData.timeLimits[0]);
+    assert.ok('percentage' in mockUsageData.timeLimits[0]);
+    assert.ok('usage' in mockUsageData.timeLimits[0]);
+    assert.ok('currentValue' in mockUsageData.timeLimits[0]);
+    assert.ok('remaining' in mockUsageData.timeLimits[0]);
+    assert.ok('nextResetTime' in mockUsageData.timeLimits[0]);
   });
 
   // Test 4: Verify token quota calculation

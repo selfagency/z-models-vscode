@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 // Simple integration test runner
-const { execSync } = require('child_process');
-const path = require('path');
+const { execSync } = require('node:child_process');
+const path = require('node:path');
 
 console.log('Running integration tests...\n');
 
 try {
   // Run integration tests with a custom config that includes them
-  const result = execSync(
+  execSync(
     'npx vitest run test/integration/core-functionality.test.js --config vitest.integration.config.js',
     {
       cwd: path.resolve(__dirname, '../..'),

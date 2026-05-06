@@ -18,7 +18,7 @@ try {
   // In test environments, package.json may not be resolvable
 }
 
-function extractResponseText(parts: readonly any[]): string {
+function extractResponseText(parts: readonly (vscode.ChatResponseMarkdownPart | unknown)[]): string {
   if (!Array.isArray(parts)) return '';
   return parts
     .filter((part): part is vscode.ChatResponseMarkdownPart => part instanceof vscode.ChatResponseMarkdownPart)
@@ -45,8 +45,8 @@ function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageMode
     }
 
     // VS Code >= 1.96: ChatResponseTurn2 has 'content' property
-    if ('content' in turn && Array.isArray((turn as any).content)) {
-      const text = extractResponseText((turn as any).content);
+    if ('content' in turn && Array.isArray(turn.content)) {
+      const text = extractResponseText(turn.content);
       if (text) {
         messages.push(vscode.LanguageModelChatMessage.Assistant(text));
       }
