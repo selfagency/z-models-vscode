@@ -45,10 +45,13 @@ function toHistoryMessages(chatContext: vscode.ChatContext): vscode.LanguageMode
     }
 
     // VS Code >= 1.96: ChatResponseTurn2 has 'content' property
-    if ('content' in turn && Array.isArray(turn.content)) {
-      const text = extractResponseText(turn.content);
-      if (text) {
-        messages.push(vscode.LanguageModelChatMessage.Assistant(text));
+    if ('content' in turn) {
+      const turnWithContent = turn as { content: readonly (vscode.ChatResponseMarkdownPart | unknown)[] };
+      if (Array.isArray(turnWithContent.content)) {
+        const text = extractResponseText(turnWithContent.content);
+        if (text) {
+          messages.push(vscode.LanguageModelChatMessage.Assistant(text));
+        }
       }
     }
   }
