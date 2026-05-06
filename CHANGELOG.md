@@ -23,6 +23,10 @@ This major version release brings critical stability fixes, architectural improv
 - AbortSignal wiring throughout model fetching and streaming pipelines
 - Implemented `extractResponseText()` helper for robust history message conversion
 - Better error handling and logging in MCP registration flow
+- Added `request_id`, `do_sample`, `stop`, and `user_id` request mapping for Z.ai chat requests
+- Token counting now prefers the Z.ai tokenizer API for supported models and falls back safely when unavailable
+- Cached token counts are now surfaced in usage telemetry when returned by the API
+- Preserved thinking history now attaches only to the latest assistant turn in outgoing message history
 
 ### 🧪 Quality
 

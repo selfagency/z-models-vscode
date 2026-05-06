@@ -33,8 +33,7 @@ export function resolveModelCapabilities(model: any): {
   const id = typeof model?.id === 'string' ? model.id : '';
   return {
     completionChat: model?.capabilities?.completionChat ?? /^glm-/i.test(id),
-    functionCalling:
-      model?.toolCalling ?? model?.capabilities?.functionCalling ?? inferToolCallingFromModelId(id),
+    functionCalling: model?.toolCalling ?? model?.capabilities?.functionCalling ?? inferToolCallingFromModelId(id),
     vision: model?.supportsVision ?? model?.capabilities?.vision ?? inferVisionFromModelId(id),
   };
 }

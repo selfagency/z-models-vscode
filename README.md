@@ -102,6 +102,9 @@ This provider supports the following `modelOptions` keys (used internally by VS 
 - `temperature: number`
 - `topP: number`
 - `safePrompt: boolean`
+- `doSample: boolean` (alias: `do_sample`)
+- `stop: string[]` (only the first stop string is sent)
+- `userId: string` (alias: `user_id`; must be 6–128 characters)
 
 Thinking controls:
 
@@ -123,9 +126,10 @@ Web search tool:
 Notes:
 
 - Requests use streaming (`stream: true`) and tool streaming (`tool_stream: true`) when tools are present.
+- Each chat request includes a generated `request_id` for tracing support.
 - Tool calls are assembled incrementally from SSE deltas and emitted as soon as arguments become valid JSON.
 - Cache usage is automatic server-side; cached prompt token counts are logged when returned by the API (`usage.prompt_tokens_details.cached_tokens`).
-- Token counting in VS Code uses a compatible approximation (`cl100k_base`) and should be treated as an estimate for GLM models.
+- Token counting uses the Z.ai tokenizer API for supported GLM-4.5 / GLM-4.6 models and falls back to a compatible approximation (`cl100k_base`) for other models.
 
 ## 🛡️ Privacy & Security
 

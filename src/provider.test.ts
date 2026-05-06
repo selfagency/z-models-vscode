@@ -1,3 +1,4 @@
+import got from 'got';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LanguageModelChatMessageRole,
@@ -801,10 +802,8 @@ describe('toZMessages Edge Cases', () => {
     const imagePart = new LanguageModelDataPart(new Uint8Array([1]), 'image/png');
     const videoPart = new LanguageModelDataPart(new Uint8Array([2]), 'video/mp4');
     const filePart = new LanguageModelDataPart(new Uint8Array([3]), 'application/pdf');
-    
-    const msgs = provider['toZMessages']([
-      userMsg(textPart, imagePart, videoPart, filePart),
-    ]);
+
+    const msgs = provider['toZMessages']([userMsg(textPart, imagePart, videoPart, filePart)]);
 
     expect(msgs).toHaveLength(1);
     const content = (msgs[0] as any).content as any[];
@@ -1276,22 +1275,29 @@ describe('Model Options Helper', () => {
   });
 
   it('parses supported modelOptions into normalized request options', () => {
+    const nonCompulsoryModel = { ...baseModel, id: 'glm-4.6' };
     const parsed = (provider as any).parseModelOptions(
       {
         temperature: 0.2,
         topP: 0.9,
         safePrompt: true,
+        doSample: false,
+        stop: ['first-stop', 'second-stop'],
+        userId: 'user-123',
         thinkingType: 'disabled',
         clearThinking: false,
         jsonMode: true,
         webSearch: true,
       },
-      baseModel,
+      nonCompulsoryModel,
     );
 
     expect(parsed.temperature).toBe(0.2);
     expect(parsed.topP).toBe(0.9);
     expect(parsed.safePrompt).toBe(true);
+    expect(parsed.doSample).toBe(false);
+    expect(parsed.stop).toEqual(['first-stop']);
+    expect(parsed.userId).toBe('user-123');
     expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
     expect(parsed.responseFormat).toEqual({ type: 'json_object' });
     expect(parsed.webSearchTool).toBeDefined();
@@ -1304,6 +1310,15 @@ describe('Model Options Helper', () => {
     expect(parsed.webSearchTool).toBeDefined();
     expect(parsed.webSearchTool.web_search).toBeDefined();
     expect(parsed.webSearchTool.web_search.search_engine).toBe('search_pro_jina');
+  });
+
+  it('ignores explicit thinking disabled for compulsory-thinking models', () => {
+    const logWarnSpy = vi.spyOn((provider as any).log, 'warn');
+
+    const parsed = (provider as any).parseModelOptions({ thinkingType: 'disabled' }, baseModel);
+
+    expect(parsed.thinking).toBeUndefined();
+    expect(logWarnSpy).toHaveBeenCalledWith('[Z] Model glm-5.1 thinks compulsorily; ignoring thinking=disabled.');
   });
 
   it('includes all GLM model token limits', () => {
@@ -1347,6 +1362,8 @@ describe('Model Options Helper', () => {
 
     await (provider as any).initClient(true);
 
+    const requestModel = { ...baseModel, id: 'glm-4.6' };
+
     const parseSpy = vi.spyOn(provider as any, 'parseModelOptions');
     const streamSpy = vi.fn().mockResolvedValue(
       (async function* () {
@@ -1359,18 +1376,21 @@ describe('Model Options Helper', () => {
     );
 
     (provider as any).client = {
-      models: { list: vi.fn().mockResolvedValue({ data: [baseModel] }) },
+      models: { list: vi.fn().mockResolvedValue({ data: [requestModel] }) },
       chat: { stream: streamSpy },
     };
     (provider as any).mcpConfig = { vision: true, search: true, reader: true, zread: true };
 
     await provider.provideLanguageModelChatResponse(
-      baseModel as any,
+      requestModel as any,
       [{ role: LanguageModelChatMessageRole.User, content: [new LanguageModelTextPart('hi')], name: undefined }] as any,
       {
         modelOptions: {
           thinkingType: 'disabled',
           clearThinking: false,
+          doSample: false,
+          stop: ['done', 'extra'],
+          userId: 'user-123',
           jsonMode: true,
           webSearch: true,
         },
@@ -1381,8 +1401,12 @@ describe('Model Options Helper', () => {
 
     expect(parseSpy).toHaveBeenCalled();
     const payload = streamSpy.mock.calls[0][0];
+    expect(payload.requestId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(payload.thinking).toEqual({ type: 'disabled', clear_thinking: false });
     expect(payload.responseFormat).toEqual({ type: 'json_object' });
+    expect(payload.doSample).toBe(false);
+    expect(payload.stop).toEqual(['done']);
+    expect(payload.userId).toBe('user-123');
     expect(payload.toolStream).toBe(true);
     expect(Array.isArray(payload.tools)).toBe(true);
     expect(payload.tools.some((t: any) => t.type === 'web_search')).toBe(true);
@@ -1540,9 +1564,34 @@ describe('Token Count Provision', () => {
     provider = new ZChatModelProvider(mockContext, undefined, false);
   });
 
+  it('uses the Z tokenizer API for supported GLM models', async () => {
+    vi.spyOn(mockContext.secrets, 'get').mockResolvedValue('test-api-key');
+    const postSpy = vi.spyOn(got, 'post').mockReturnValue({
+      json: vi.fn().mockResolvedValue({ usage: { total_tokens: 42 } }),
+    } as any);
+
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-4.6' } as any, 'Hello, tokenizer!', {} as any);
+
+    expect(tokenCount).toBe(42);
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    const [url, options] = postSpy.mock.calls[0];
+    expect(String(url)).toContain('/tokenizer');
+    expect((options as any).json.model).toBe('glm-4.6');
+    expect((options as any).json.messages).toEqual([{ role: 'user', content: 'Hello, tokenizer!' }]);
+  });
+
+  it('falls back to tiktoken when the tokenizer API is not used', async () => {
+    const postSpy = vi.spyOn(got, 'post');
+
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, 'Fallback please', {} as any);
+
+    expect(tokenCount).toBeGreaterThan(0);
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   it('should count tokens for plain text', async () => {
     const text = 'Hello, world! This is a test.';
-    const tokenCount = await provider.provideTokenCount({} as any, text, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, text, {} as any);
     expect(tokenCount).toBeGreaterThan(0);
   });
 
@@ -1552,7 +1601,7 @@ describe('Token Count Provision', () => {
       content: [new LanguageModelTextPart('Hello, world!')],
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message, {} as any);
     expect(tokenCount).toBeGreaterThan(0);
   });
 
@@ -1562,7 +1611,7 @@ describe('Token Count Provision', () => {
       content: 'Hello, world!',
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message as any, {} as any);
     expect(tokenCount).toBeGreaterThan(0);
   });
 
@@ -1572,7 +1621,7 @@ describe('Token Count Provision', () => {
       content: [new LanguageModelToolCallPart('test-id', 'test-function', { key: 'value' })],
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message, {} as any);
     expect(tokenCount).toBeGreaterThan(0);
   });
 
@@ -1582,13 +1631,13 @@ describe('Token Count Provision', () => {
       content: [new LanguageModelToolResultPart('test-id', [new LanguageModelTextPart('result')])],
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message, {} as any);
     expect(tokenCount).toBeGreaterThan(0);
   });
 
   it('should return 0 for empty text', async () => {
     const text = '';
-    const tokenCount = await provider.provideTokenCount({} as any, text, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, text, {} as any);
     expect(tokenCount).toBe(0);
   });
 
@@ -1598,7 +1647,7 @@ describe('Token Count Provision', () => {
       content: [],
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message, {} as any);
     expect(tokenCount).toBe(0);
   });
 
@@ -1608,7 +1657,7 @@ describe('Token Count Provision', () => {
       content: [{ unexpected: true }],
       name: undefined,
     };
-    const tokenCount = await provider.provideTokenCount({} as any, message as any, {} as any);
+    const tokenCount = await provider.provideTokenCount({ id: 'glm-5.1' } as any, message as any, {} as any);
     expect(tokenCount).toBe(0);
   });
 });
@@ -1653,7 +1702,7 @@ describe('Clear Tool Call ID Mappings Edge Cases', () => {
 describe('Provider dispose', () => {
   it('cleans up tokenizer and model cache safely', async () => {
     const provider = new ZChatModelProvider(mockContext, undefined, false);
-    await provider.provideTokenCount({} as any, 'hello world', {} as any);
+    await provider.provideTokenCount({ id: 'glm-5.1' } as any, 'hello world', {} as any);
     (provider as any).fetchedModels = [
       {
         id: 'glm-5',
@@ -1973,6 +2022,44 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
     expect(textParts.length).toBeGreaterThan(0);
     expect(textParts.some((p: any) => p.value === 'Here is my analysis')).toBe(true);
   });
+
+  it('includes cached_tokens in the usage data part when returned by the API', async () => {
+    async function* makeStreamWithUsage() {
+      yield {
+        data: {
+          choices: [{ delta: { content: 'final answer', toolCalls: undefined }, finish_reason: 'stop' }],
+          usage: {
+            prompt_tokens: 11,
+            completion_tokens: 4,
+            prompt_tokens_details: { cached_tokens: 7 },
+          },
+        },
+      };
+    }
+
+    (provider as any).client.chat.stream.mockResolvedValue(makeStreamWithUsage());
+
+    const reports: any[] = [];
+    const mockProgress = {
+      report: vi.fn((part: any) => {
+        reports.push(part);
+      }),
+    };
+
+    await provider.provideLanguageModelChatResponse(
+      mockModel as any,
+      [{ role: LanguageModelChatMessageRole.User, content: [new LanguageModelTextPart('hi')], name: undefined }],
+      {} as any,
+      mockProgress as any,
+      mockToken as any,
+    );
+
+    const usagePart = reports.find((part: any) => part?.mimeType === 'application/vnd.zai.usage+json');
+    expect(usagePart).toBeDefined();
+
+    const usagePayload = JSON.parse(Buffer.from(usagePart.data).toString('utf8'));
+    expect(usagePayload.cached_tokens).toBe(7);
+  });
 });
 
 // ── EventEmitter (vscode mock) ────────────────────────────────────────────────
@@ -2215,20 +2302,16 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
 
   it('logs warning for finish_reason: length', async () => {
     const logWarnSpy = vi.spyOn(provider['log'], 'warn');
-    
+
     async function* makeStreamWithLength() {
       yield {
         data: {
-          choices: [
-            { delta: { content: 'truncated response', toolCalls: undefined }, finish_reason: null },
-          ],
+          choices: [{ delta: { content: 'truncated response', toolCalls: undefined }, finish_reason: null }],
         },
       };
       yield {
         data: {
-          choices: [
-            { delta: { toolCalls: undefined }, finish_reason: 'length' },
-          ],
+          choices: [{ delta: { toolCalls: undefined }, finish_reason: 'length' }],
         },
       };
     }
@@ -2241,7 +2324,7 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
       messages,
       {} as any,
       { report: () => {} } as any,
-      mockToken as any
+      mockToken as any,
     );
 
     expect(logWarnSpy).toHaveBeenCalledWith('[Z] Response truncated due to length limit (finish_reason: length)');
@@ -2249,20 +2332,16 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
 
   it('logs warning for finish_reason: sensitive', async () => {
     const logWarnSpy = vi.spyOn(provider['log'], 'warn');
-    
+
     async function* makeStreamWithSensitive() {
       yield {
         data: {
-          choices: [
-            { delta: { content: 'partial', toolCalls: undefined }, finish_reason: null },
-          ],
+          choices: [{ delta: { content: 'partial', toolCalls: undefined }, finish_reason: null }],
         },
       };
       yield {
         data: {
-          choices: [
-            { delta: { toolCalls: undefined }, finish_reason: 'sensitive' },
-          ],
+          choices: [{ delta: { toolCalls: undefined }, finish_reason: 'sensitive' }],
         },
       };
     }
@@ -2275,7 +2354,7 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
       messages,
       {} as any,
       { report: () => {} } as any,
-      mockToken as any
+      mockToken as any,
     );
 
     expect(logWarnSpy).toHaveBeenCalledWith('[Z] Response stopped due to content policy (finish_reason: sensitive)');
@@ -2283,20 +2362,16 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
 
   it('logs error for finish_reason: model_context_window_exceeded', async () => {
     const logErrorSpy = vi.spyOn(provider['log'], 'error');
-    
+
     async function* makeStreamWithContextExceeded() {
       yield {
         data: {
-          choices: [
-            { delta: { content: 'response', toolCalls: undefined }, finish_reason: null },
-          ],
+          choices: [{ delta: { content: 'response', toolCalls: undefined }, finish_reason: null }],
         },
       };
       yield {
         data: {
-          choices: [
-            { delta: { toolCalls: undefined }, finish_reason: 'model_context_window_exceeded' },
-          ],
+          choices: [{ delta: { toolCalls: undefined }, finish_reason: 'model_context_window_exceeded' }],
         },
       };
     }
@@ -2309,28 +2384,26 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
       messages,
       {} as any,
       { report: () => {} } as any,
-      mockToken as any
+      mockToken as any,
     );
 
-    expect(logErrorSpy).toHaveBeenCalledWith('[Z] Model context window exceeded (finish_reason: model_context_window_exceeded)');
+    expect(logErrorSpy).toHaveBeenCalledWith(
+      '[Z] Model context window exceeded (finish_reason: model_context_window_exceeded)',
+    );
   });
 
   it('logs error for finish_reason: network_error', async () => {
     const logErrorSpy = vi.spyOn(provider['log'], 'error');
-    
+
     async function* makeStreamWithNetworkError() {
       yield {
         data: {
-          choices: [
-            { delta: { content: 'partial', toolCalls: undefined }, finish_reason: null },
-          ],
+          choices: [{ delta: { content: 'partial', toolCalls: undefined }, finish_reason: null }],
         },
       };
       yield {
         data: {
-          choices: [
-            { delta: { toolCalls: undefined }, finish_reason: 'network_error' },
-          ],
+          choices: [{ delta: { toolCalls: undefined }, finish_reason: 'network_error' }],
         },
       };
     }
@@ -2343,7 +2416,7 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
       messages,
       {} as any,
       { report: () => {} } as any,
-      mockToken as any
+      mockToken as any,
     );
 
     expect(logErrorSpy).toHaveBeenCalledWith('[Z] Network error occurred (finish_reason: network_error)');
@@ -2351,20 +2424,16 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
 
   it('logs debug for unrecognized finish_reason', async () => {
     const logDebugSpy = vi.spyOn(provider['log'], 'debug');
-    
+
     async function* makeStreamWithUnrecognized() {
       yield {
         data: {
-          choices: [
-            { delta: { content: 'response', toolCalls: undefined }, finish_reason: null },
-          ],
+          choices: [{ delta: { content: 'response', toolCalls: undefined }, finish_reason: null }],
         },
       };
       yield {
         data: {
-          choices: [
-            { delta: { toolCalls: undefined }, finish_reason: 'custom_stop_reason' },
-          ],
+          choices: [{ delta: { toolCalls: undefined }, finish_reason: 'custom_stop_reason' }],
         },
       };
     }
@@ -2377,7 +2446,7 @@ describe('provideLanguageModelChatResponse — non-standard finish_reason handli
       messages,
       {} as any,
       { report: () => {} } as any,
-      mockToken as any
+      mockToken as any,
     );
 
     expect(logDebugSpy).toHaveBeenCalledWith('[Z] Unrecognized finish_reason: custom_stop_reason');
