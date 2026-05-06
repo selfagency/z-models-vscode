@@ -45,12 +45,25 @@ import { toZRole } from './role-utils.js';
  */
 class LanguageModelThinkingPart {
   constructor(public readonly value: string) {}
+  private accumulatedReasoningContent: string = '';
+
+  /**
+   * Test helper to set accumulated reasoning content.
+   * Only intended for use in tests to access private state.
+   */
+  public setAccumulatedReasoningContent(value: string): void {
+    this.accumulatedReasoningContent = value;
+  }
 }
 
 interface ProgressChatStream {
   markdown(content: string): void;
   progress?(content: string): void;
   thinkingProgress?(delta: { text?: string | string[]; id?: string; metadata?: Record<string, unknown> }): void;
+  /**
+   * Test helper to set accumulated reasoning content.
+   * Only intended for use in tests to access private state.
+   */
 }
 
 function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
@@ -576,6 +589,17 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     return false;
   }
 
+  private hasVideoInput(messages: readonly LanguageModelChatMessage[]): boolean {
+    for (const msg of messages) {
+      for (const part of msg.content) {
+        if (part instanceof LanguageModelDataPart && part.mimeType?.startsWith('video/')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   private hasFileInput(messages: readonly LanguageModelChatMessage[]): boolean {
     // Document MIME types that should be handled as file_url chunks
     const documentMimeTypes = [
@@ -596,7 +620,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           const mimeType = part.mimeType?.toLowerCase();
           if (
             mimeType &&
-            documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(`${type.split('/')[0]}/`))
+            documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(type.split('/')[0] + '/'))
           ) {
             return true;
           }
@@ -696,7 +720,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
   /* c8 ignore start */
   private createHttpClient(apiKey: string): {
-    models: { list: (abortSignal?: AbortSignal) => Promise<{ data: Record<string, unknown>[] }> };
+    models: { list: (abortSignal?: AbortSignal) => Promise<{ data: any[] }> };
     chat: {
       stream: (payload: {
         model: string;
@@ -997,7 +1021,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     // Smart-default clear_thinking based on endpoint: disabled (false) for coding, enabled (true) for general
     const isOnCodingEndpoint = this.getConfiguredBaseUrl().includes('/coding/');
-    const defaultClearThinking = !isOnCodingEndpoint;
+    const defaultClearThinking = isOnCodingEndpoint ? false : true;
     const finalClearThinking = clearThinking !== undefined ? clearThinking : defaultClearThinking;
 
     const compulsoryThinking = modelThinksCompulsorily(foundModel.id);
@@ -1604,7 +1628,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const streamAdapter = createGenericAdapter(
         {
           onThinking: async (text: string) => {
-            this.log.debug(`[Z] parsed <think> delta length: ${text.length}`);
+            this.log.debug('[Z] parsed <think> delta length: ' + text.length);
           },
           onContent: async (text: string) => {
             await loopRenderer.write(text);
@@ -1644,13 +1668,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             this.usageMetrics.promptTokens = normalized.usage.inputTokens;
           if (typeof normalized.usage.outputTokens === 'number')
             this.usageMetrics.completionTokens = normalized.usage.outputTokens;
-          const normalizedUsageExt = normalized.usage as Record<string, unknown>;
-          if (typeof normalizedUsageExt['cachedTokens'] === 'number') {
-            this.usageMetrics.cachedTokens = normalizedUsageExt['cachedTokens'] as number;
+          if (typeof (normalized.usage as any).cachedTokens === 'number') {
+            this.usageMetrics.cachedTokens = (normalized.usage as any).cachedTokens;
           }
         }
-        const usage = (chunk?.data as Record<string, unknown> | undefined)?.['usage'] as Record<string, unknown> | undefined;
-        const cachedTokens = (usage?.['prompt_tokens_details'] as Record<string, unknown> | undefined)?.['cached_tokens'];
+        const usage = (chunk?.data as any)?.usage;
+        const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
         if (typeof cachedTokens === 'number') {
           this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
           this.usageMetrics.cachedTokens = cachedTokens;
@@ -2123,9 +2146,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             statusCodes: RETRYABLE_STATUS_CODES,
           },
         })
-        .json()) as Record<string, unknown>;
+        .json()) as any;
 
-      const totalTokens = (response?.['usage'] as Record<string, unknown> | undefined)?.['total_tokens'];
+      const totalTokens = response?.usage?.total_tokens;
       if (typeof totalTokens === 'number') {
         this.tokenizerCapabilityCache.set(normalizedModelId, true);
         this.log.debug(`[Z] Tokenizer API count for ${modelId}: ${totalTokens}`);
@@ -2133,7 +2156,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
     } catch (error) {
       this.tokenizerCapabilityCache.set(normalizedModelId, false);
-      this.log.debug(`[Z] Tokenizer API unavailable, falling back to cl100k_base: ${String(error)}`);
+      this.log.debug('[Z] Tokenizer API unavailable, falling back to cl100k_base: ' + String(error));
     }
 
     return undefined;

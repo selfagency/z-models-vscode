@@ -696,10 +696,20 @@ describe('ZChatModelProvider — toZMessages', () => {
     expect(msg.content).toBe('thinking...');
     expect(msg.tool_calls).toHaveLength(1);
   });
+interface ZChatModelProviderTestable extends ZChatModelProvider {
+  setAccumulatedReasoningContent(value: string): void;
+}
+
+  beforeEach(() => {
+    // Monkey patch setAccumulatedReasoningContent on provider instance
+    (provider as any).setAccumulatedReasoningContent = function (value: string) {
+      (this as any).accumulatedReasoningContent = value;
+    };
+  });
 
   it('includes reasoning_content in assistant message when accumulated from streaming', () => {
     // Set accumulatedReasoningContent to simulate streaming response
-    (provider as any).accumulatedReasoningContent = 'Model is thinking about the problem...';
+    (provider as any).setAccumulatedReasoningContent('Model is thinking about the problem...');
 
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('Here is my answer'))]);
 
@@ -2089,12 +2099,18 @@ describe('EventEmitter', () => {
     const { EventEmitter } = await import('./test/vscode.mock.js');
     const emitter = new EventEmitter<void>();
     const spy = vi.fn();
-    emitter.event(() => {
-      throw new Error('boom');
-    });
-    emitter.event(spy);
-    expect(() => emitter.fire()).not.toThrow();
-    expect(spy).toHaveBeenCalled();
+    const originalConsoleError = console.error;
+    console.error = vi.fn();
+    try {
+      emitter.event(() => {
+        throw new Error('boom');
+      });
+      emitter.event(spy);
+      expect(() => emitter.fire()).not.toThrow();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   it('clears all listeners on dispose', async () => {
