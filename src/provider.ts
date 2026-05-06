@@ -1228,6 +1228,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         return getKnownTokenLimits(modelId);
       }
 
+      interface ModelLimitResponse { context_window?: number; max_tokens?: number; max_completion_tokens?: number }
       const response = (await got
         .get(`${baseUrl}/models/${modelId}`, {
           headers: {
@@ -1237,7 +1238,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           },
           signal: abortSignal,
         })
-        .json()) as any;
+        .json<ModelLimitResponse>());
 
       return {
         maxInputTokens: response.context_window ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxInputTokens,
@@ -2139,6 +2140,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
 
     try {
+      interface TokenizerResponse { usage?: { total_tokens?: number } }
       const response = (await got
         .post(`${baseUrl}/tokenizer`, {
           headers: {
@@ -2157,7 +2159,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             statusCodes: RETRYABLE_STATUS_CODES,
           },
         })
-        .json()) as any;
+        .json<TokenizerResponse>());
 
       const totalTokens = response?.usage?.total_tokens;
       if (typeof totalTokens === 'number') {
