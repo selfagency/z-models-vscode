@@ -7,6 +7,7 @@ import {
   createProviderError,
   createVSCodeAgentLoop,
   errorToProviderCode,
+  httpStatusToErrorCode,
   isRetryableError,
   withRetry,
   type ApiKeyManager,
@@ -518,22 +519,24 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
    */
   private toLanguageModelError(status: number, details: string): Error {
     const { userMessage, logDetails } = this.extractUserFriendlyErrorMessage(status, details);
+    const providerCode = httpStatusToErrorCode(status);
 
     // Log full details for debugging (but don't show to user)
     if (logDetails) {
       this.log.debug(`[Z] Full error details (status=${status}): ${logDetails}`);
     }
+    this.log.debug(`[Z] HTTP status ${status} mapped to provider code: ${providerCode}`);
 
-    if (status === 401 || status === 403) {
-      return LanguageModelError.NoPermissions(userMessage);
+    switch (providerCode) {
+      case 'invalid_api_key':
+        return LanguageModelError.NoPermissions(userMessage);
+      case 'model_not_found':
+        return LanguageModelError.NotFound(userMessage);
+      case 'rate_limited':
+        return LanguageModelError.Blocked(userMessage);
+      default:
+        return new Error(userMessage);
     }
-    if (status === 404) {
-      return LanguageModelError.NotFound(userMessage);
-    }
-    if (status === 429) {
-      return LanguageModelError.Blocked(userMessage);
-    }
-    return new Error(userMessage);
   }
 
   /**
