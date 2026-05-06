@@ -1,0 +1,26 @@
+test/integration/run-integration-tests.js
+  s_45a260a096835b::t_620a34adb41d58 11
+  s_45a260a096835b::t_41db7d2fa6dfbf 4-5
+test/integration/core-functionality.test.js
+  s_45a260a096835b::t_942f64644193c7 51-60,63-67,70-77
+  s_45a260a096835b::t_64679289bedebe 1
+src/extension.ts
+  s_45a260a096835b::t_ac6e0451322c70 21
+  s_45a260a096835b::t_62deec56be3024 48-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "74dd7b3dc766d734eb4b5db81cc6a1e0c3b9cc97",
+  "prompts": {},
+  "sessions": {
+    "s_45a260a096835b": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "c02ceecb-d5d7-4d16-afdf-717509aa6149",
+        "model": "unknown"
+      },
+      "human_author": "Daniel Sieradski <2541728+selfagency@users.noreply.github.com>"
+    }
+  }
+}
