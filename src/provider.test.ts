@@ -674,7 +674,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msgs = provider.toZMessages([userMsg(dataPart)]);
 
     expect(msgs).toHaveLength(1);
-    expect((msgs[0] as any).content).toBe('[data:application/unknown-type]');
+    expect((msgs[0] as { content: unknown }).content).toBe('[data:application/unknown-type]');
   });
 
   it('includes both text and image in a multimodal message', () => {
