@@ -1148,7 +1148,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           return true;
         })
         .catch(error => {
-          this.log.warn('[Z] Startup model catalog refresh failed: ' + String(error));
+          this.log.warn(`[Z] Startup model catalog refresh failed: ${String(error)}`);
           return false;
         });
       // Do not await here (activation should not be blocked); consumers will await initPromise.
@@ -1348,7 +1348,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       this._onDidChangeLanguageModelChatInformation.fire(undefined);
       return this.fetchedModels;
     } catch (error) {
-      this.log.error('[Z] Failed to fetch models: ' + String(error));
+      this.log.error(`[Z] Failed to fetch models: ${String(error)}`);
       return [];
     }
   }
@@ -1380,7 +1380,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }
 
     let apiKey: string | undefined = await this.getApiKeyFromSecretsOrEnv();
-    this.log.debug('[Z] Prompting user for API key (existing present: ' + !!apiKey + ')');
+    this.log.debug(`[Z] Prompting user for API key (existing present: ${!!apiKey})`);
     apiKey = await window.showInputBox({
       placeHolder: 'Z API Key',
       password: true,
@@ -1409,7 +1409,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       await this.context.secrets.store('Z_API_KEY', apiKey);
       this.log.info('[Z] API key stored successfully');
     } catch (e) {
-      this.log.warn('[Z] Failed to store API key in secret storage: ' + String(e));
+      this.log.warn(`[Z] Failed to store API key in secret storage: ${String(e)}`);
     }
     this.client = this.createHttpClient(apiKey);
     this.fetchedModels = null;
@@ -1430,14 +1430,14 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }
 
     let apiKey: string | undefined = await this.getApiKeyFromSecretsOrEnv();
-    this.log.debug('[Z] initClient called (silent=' + silent + ', hasStoredKey=' + !!apiKey + ')');
+    this.log.debug(`[Z] initClient called (silent=${silent}, hasStoredKey=${!!apiKey})`);
     if (!silent && !apiKey) {
       apiKey = await this.setApiKey();
     } else if (apiKey) {
       this.client = this.createHttpClient(apiKey);
     }
 
-    this.log.debug('[Z] initClient result: ' + !!apiKey);
+    this.log.debug(`[Z] initClient result: ${!!apiKey}`);
     return !!apiKey;
   }
 
@@ -1448,7 +1448,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     options: { silent: boolean },
     token: CancellationToken,
   ): Promise<LanguageModelChatInformation[]> {
-    this.log.info('[Z] provideLanguageModelChatInformation called (silent=' + options.silent + ')');
+    this.log.info(`[Z] provideLanguageModelChatInformation called (silent=${options.silent})`);
     // If an activation-triggered init is in-flight, wait for it to finish before proceeding.
     if (this.initPromise) {
       try {
@@ -1478,7 +1478,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         this.log.debug('[Z] provideLanguageModelChatInformation cancelled after model fetch');
         return [];
       }
-      this.log.info('[Z] Returning ' + models.length + ' models');
+      this.log.info(`[Z] Returning ${models.length} models`);
       return models.map(model =>
         getChatModelInfo({
           ...model,
@@ -1628,7 +1628,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const streamAdapter = createGenericAdapter(
         {
           onThinking: async (text: string) => {
-            this.log.debug('[Z] parsed <think> delta length: ' + text.length);
+            this.log.debug(`[Z] parsed <think> delta length: ${text.length}`);
           },
           onContent: async (text: string) => {
             await loopRenderer.write(text);
@@ -1668,11 +1668,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             this.usageMetrics.promptTokens = normalized.usage.inputTokens;
           if (typeof normalized.usage.outputTokens === 'number')
             this.usageMetrics.completionTokens = normalized.usage.outputTokens;
-          if (typeof (normalized.usage as any).cachedTokens === 'number') {
-            this.usageMetrics.cachedTokens = (normalized.usage as any).cachedTokens;
+          const normUsageExtra = normalized.usage as unknown as { cachedTokens?: number };
+          if (typeof normUsageExtra.cachedTokens === 'number') {
+            this.usageMetrics.cachedTokens = normUsageExtra.cachedTokens;
           }
         }
-        const usage = (chunk?.data as any)?.usage;
+        const usage = (chunk?.data as { usage?: { prompt_tokens_details?: { cached_tokens?: number } } } | undefined)?.usage;
         const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
         if (typeof cachedTokens === 'number') {
           this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
@@ -1819,7 +1820,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
       // Log full error details for debugging (but don't expose to user)
       const fullErrorDetails = error instanceof Error ? error.stack || error.message : String(error);
-      this.log.debug('[Z] provideLanguageModelChatResponse full error details: ' + fullErrorDetails);
+      this.log.debug(`[Z] provideLanguageModelChatResponse full error details: ${fullErrorDetails}`);
 
       // If the error already has an HTTP status, classify it
       const httpStatus = (error as any)?.response?.statusCode ?? (error as any)?.statusCode;
@@ -1829,7 +1830,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      this.log.error('[Z] provideLanguageModelChatResponse error: ' + errorMessage);
+      this.log.error(`[Z] provideLanguageModelChatResponse error: ${errorMessage}`);
 
       // Re-throw LanguageModelError as-is, wrap everything else
       if (error instanceof LanguageModelError) throw error;
@@ -1867,7 +1868,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   }
 
   public toZMessages(messages: readonly LanguageModelChatMessage[]): ZMessage[] {
-    this.log.debug('[Z] toZMessages called with ' + messages.length + ' messages');
+    this.log.debug(`[Z] toZMessages called with ${messages.length} messages`);
     const out: ZMessage[] = [];
     const toolNameByCallId = new Map<string, string>();
 
@@ -2156,7 +2157,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       }
     } catch (error) {
       this.tokenizerCapabilityCache.set(normalizedModelId, false);
-      this.log.debug('[Z] Tokenizer API unavailable, falling back to cl100k_base: ' + String(error));
+      this.log.debug(`[Z] Tokenizer API unavailable, falling back to cl100k_base: ${String(error)}`);
     }
 
     return undefined;
