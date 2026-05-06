@@ -696,9 +696,9 @@ describe('ZChatModelProvider — toZMessages', () => {
     expect(msg.content).toBe('thinking...');
     expect(msg.tool_calls).toHaveLength(1);
   });
-interface ZChatModelProviderTestable extends ZChatModelProvider {
-  setAccumulatedReasoningContent(value: string): void;
-}
+  interface ZChatModelProviderTestable extends ZChatModelProvider {
+    setAccumulatedReasoningContent(value: string): void;
+  }
 
   beforeEach(() => {
     // Monkey patch setAccumulatedReasoningContent on provider instance
