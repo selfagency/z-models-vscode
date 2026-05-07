@@ -1,5 +1,5 @@
 // biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
-// biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
+
 import { describe, expect, it } from 'vitest';
 import {
   LanguageModelChatMessageRole,

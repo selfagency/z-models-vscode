@@ -1,5 +1,5 @@
 // biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
-// biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZChatModelProvider } from '../../provider.js';
 
