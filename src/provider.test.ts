@@ -696,16 +696,6 @@ describe('ZChatModelProvider — toZMessages', () => {
     expect(msg.content).toBe('thinking...');
     expect(msg.tool_calls).toHaveLength(1);
   });
-  interface ZChatModelProviderTestable extends ZChatModelProvider {
-    setAccumulatedReasoningContent(value: string): void;
-  }
-
-  beforeEach(() => {
-    // Monkey patch setAccumulatedReasoningContent on provider instance
-    (provider as any).setAccumulatedReasoningContent = function (value: string) {
-      (this as any).accumulatedReasoningContent = value;
-    };
-  });
 
   it('includes reasoning_content in assistant message when accumulated from streaming', () => {
     // Set accumulatedReasoningContent to simulate streaming response

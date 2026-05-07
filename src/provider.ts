@@ -45,15 +45,6 @@ import { toZRole } from './role-utils.js';
  */
 class LanguageModelThinkingPart {
   constructor(public readonly value: string) {}
-  private accumulatedReasoningContent: string = '';
-
-  /**
-   * Test helper to set accumulated reasoning content.
-   * Only intended for use in tests to access private state.
-   */
-  public setAccumulatedReasoningContent(value: string): void {
-    this.accumulatedReasoningContent = value;
-  }
 }
 
 interface ProgressChatStream {
@@ -436,7 +427,7 @@ interface ZParsedRequestOptions {
 export class ZChatModelProvider implements LanguageModelChatProvider {
   private static readonly MODEL_CACHE_TTL_MS = 30 * 60 * 1000;
 
-  private client: any | null = null;
+  private client: ReturnType<typeof this.createHttpClient> | null = null;
   private tokenizer: Tiktoken | null = null;
   private tokenizerCapabilityCache = new Map<string, boolean>();
   private fetchedModels: ZModel[] | null = null;
@@ -720,7 +711,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
   /* c8 ignore start */
   private createHttpClient(apiKey: string): {
-    models: { list: (abortSignal?: AbortSignal) => Promise<{ data: any[] }> };
+    models: { list: (abortSignal?: AbortSignal) => Promise<{ data: unknown[] }> };
     chat: {
       stream: (payload: {
         model: string;
@@ -770,7 +761,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const retry = {
       limit: MAX_RETRIES,
       statusCodes: RETRYABLE_STATUS_CODES,
-      calculateDelay: ({ attemptCount, error, retryOptions }: any) => {
+      calculateDelay: ({ attemptCount, error, retryOptions }: { attemptCount: number; error: { response?: { statusCode?: number } }; retryOptions: { limit: number; statusCodes: number[] } }) => {
         if (attemptCount > retryOptions.limit) {
           return 0;
         }
@@ -898,7 +889,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
                               typeof delta?.content === 'string'
                                 ? delta.content
                                 : Array.isArray(delta?.content)
-                                  ? delta.content.map((c: any) => (typeof c?.text === 'string' ? c.text : '')).join('')
+                                  ? delta.content.map((c: { text?: string }) => (typeof c?.text === 'string' ? c.text : '')).join('')
                                   : undefined,
                             reasoning_content:
                               typeof delta?.reasoning_content === 'string' ? delta.reasoning_content : undefined,
@@ -943,7 +934,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
                                   ? delta.content
                                   : Array.isArray(delta?.content)
                                     ? delta.content
-                                        .map((c: any) => (typeof c?.text === 'string' ? c.text : ''))
+                                        .map((c: { text?: string }) => (typeof c?.text === 'string' ? c.text : ''))
                                         .join('')
                                     : undefined,
                               reasoning_content:
@@ -1010,7 +1001,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       throw new Error('user_id must be between 6 and 128 characters long');
     }
 
-    const explicitThinking = modelOptions.thinking === true || modelOptions.thinkingType === 'enabled';
+    const explicitThinking = modelOptions.thinking || modelOptions.thinkingType === 'enabled';
     const explicitDisabled = modelOptions.thinking === false || modelOptions.thinkingType === 'disabled';
     const clearThinking =
       typeof modelOptions.clearThinking === 'boolean'
@@ -1265,14 +1256,14 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     }
 
     try {
-      let zModels: any[] = [];
+      let zModels: ZModel[] = [];
       let usedClientList = false;
 
       // Compatibility path: tests and advanced users can inject a custom client with models.list().
       if (this.client?.models?.list) {
         usedClientList = true;
         const response = await this.client.models.list(abortSignal);
-        zModels = Array.isArray(response?.data) ? response.data : [];
+        zModels = Array.isArray(response?.data) ? (response.data as ZModel[]) : [];
       }
 
       // Fallback curated set when API/model listing is unavailable.
@@ -1281,10 +1272,14 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           {
             id: 'glm-5.1',
             name: 'GLM 5.1',
-            description: 'Latest GLM model',
-            maxContextLength: 128000,
-            defaultModelTemperature: 0.7,
-            capabilities: { completionChat: true, functionCalling: true, vision: true },
+            detail: 'Latest GLM model',
+            maxInputTokens: 128000,
+            maxOutputTokens: 16384,
+            defaultCompletionTokens: 16384,
+            temperature: 0.7,
+            toolCalling: true,
+            supportsVision: true,
+            supportsParallelToolCalls: true,
           },
         ];
       }
@@ -1305,16 +1300,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             capabilities: resolveModelCapabilities(m),
             id: m.id,
             originalName: m.name ?? formatModelName(m.id),
-            detail: m.detail ?? m.description ?? undefined,
-            maxInputTokens: m.maxInputTokens ?? m.maxContextLength ?? tokenLimits.maxInputTokens ?? 32768,
+            detail: m.detail ?? undefined,
+            maxInputTokens: m.maxInputTokens ?? tokenLimits.maxInputTokens ?? 32768,
             maxOutputTokens: m.maxOutputTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
             defaultCompletionTokens:
               m.defaultCompletionTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
             toolCalling: resolveModelCapabilities(m).functionCalling,
             supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
             supportsVision: resolveModelCapabilities(m).vision,
-            temperature: m.temperature ?? m.defaultModelTemperature ?? undefined,
-            top_p: m.top_p ?? m.topP ?? undefined,
+            temperature: m.temperature ?? undefined,
+            top_p: m.top_p ?? undefined,
           };
         }),
       );
@@ -1653,9 +1648,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         const rawFinishReason =
           typeof chunk?.data?.choices?.[0]?.finish_reason === 'string'
             ? chunk.data.choices[0].finish_reason
-            : typeof chunk?.data?.choices?.[0]?.finishReason === 'string'
-              ? chunk.data.choices[0].finishReason
-              : undefined;
+            : undefined;
         const normalizedResult = normalizeZAiChunk(normalizeZAiRawChunk(chunk?.data ?? {}));
         const normalized = normalizedResult?.chunk;
 
