@@ -585,7 +585,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('Here is my answer'))]);
 
     expect(msgs).toHaveLength(1);
-    const msg = msgs[0] as any;
+    const msg = msgs[0] as { role: string; content: string; reasoning_content?: string };
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBe('Here is my answer');
     expect(msg.reasoning_content).toBe('Model is thinking about the problem...');
