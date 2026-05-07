@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  EventEmitter,
-  McpHttpServerDefinition,
-  McpStdioServerDefinition,
-  Uri,
-  workspace,
-} from 'vscode';
+import { EventEmitter, McpHttpServerDefinition, McpStdioServerDefinition, Uri, workspace } from 'vscode';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 
 const mockContext = {
@@ -55,6 +49,7 @@ describe('ZMcpServerDefinitionProvider', () => {
 
     expect(resolved).toBe(server);
     expect((resolved as McpHttpServerDefinition).headers.Authorization).toBe('Bearer secret-key');
+    expect((resolved as McpHttpServerDefinition).headers['Accept-Language']).toBe('en-US,en');
   });
 
   it('resolves stdio vision server definitions by injecting required env vars from secret storage', async () => {

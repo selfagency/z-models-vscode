@@ -10,8 +10,8 @@ export default defineConfig({
   format: ['cjs'],
   platform: 'node',
   external: ['vscode'],
-  noExternal: ['tiktoken', '@selfagency/llm-stream-parser', 'got'],
-  // llm-stream-parser ships ESM-only subpath exports; resolve them to CJS via bundling
+  noExternal: ['tiktoken', '@agentsy/normalizers', '@agentsy/processor', 'got'],
+  // Bundle the streaming helpers so the extension runtime does not depend on the old monolith surface.
   bundle: true,
   sourcemap: !production,
   minify: production,

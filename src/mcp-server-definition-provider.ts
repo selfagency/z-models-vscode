@@ -1,3 +1,9 @@
+import {
+  createMcpServerDefinitionProvider,
+  McpServerRegistry,
+  type ApiKeyManager,
+  type McpServerProvider,
+} from '@agentsy/vscode';
 import * as vscode from 'vscode';
 
 const MCP_URLS = {
@@ -17,9 +23,64 @@ const VISION_MCP_ARGS = ['-y', '@z_ai/mcp-server@latest'];
  */
 export class ZMcpServerDefinitionProvider implements vscode.McpServerDefinitionProvider {
   private readonly emitter = new vscode.EventEmitter<void>();
+  private readonly mcpProvider: McpServerProvider;
+  private readonly mcpRegistry: McpServerRegistry;
   readonly onDidChangeMcpServerDefinitions = this.emitter.event;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey'>,
+  ) {
+    this.mcpProvider = createMcpServerDefinitionProvider({
+      servers: [
+        {
+          name: 'zSearch',
+          command: MCP_URLS.search,
+          enabledSettingKey: 'mcpServers.search',
+          apiKeyHeader: 'Authorization',
+        },
+        {
+          name: 'zReader',
+          command: MCP_URLS.reader,
+          enabledSettingKey: 'mcpServers.reader',
+          apiKeyHeader: 'Authorization',
+        },
+        {
+          name: 'zRead',
+          command: MCP_URLS.zread,
+          enabledSettingKey: 'mcpServers.zread',
+          apiKeyHeader: 'Authorization',
+        },
+        {
+          name: 'zVision',
+          command: VISION_MCP_COMMAND,
+          args: VISION_MCP_ARGS,
+          env: { Z_AI_MODE: 'ZAI' },
+          enabledSettingKey: 'mcpServers.vision',
+          apiKeyEnvVar: 'Z_AI_API_KEY',
+        },
+      ],
+      settings: {
+        get: <T>(key: string, fallback?: T): T | undefined => {
+          return vscode.workspace.getConfiguration('zModels').get<T>(key, fallback as T);
+        },
+      },
+      getApiKey: async () => {
+        const managerKey = this.apiKeyManager ? await this.apiKeyManager.getApiKey() : undefined;
+        const secretKey = this.context.secrets?.get ? await this.context.secrets.get('Z_API_KEY') : undefined;
+        return managerKey ?? secretKey;
+      },
+      defaultEnabled: true,
+      defaultApiKeyHeader: 'Authorization',
+      formatApiKeyHeaderValue: (apiKey: string) => `Bearer ${apiKey}`,
+    });
+
+    this.mcpRegistry = new McpServerRegistry({
+      namespace: 'zModels.mcpServers',
+      providers: [this.mcpProvider],
+      autoRegister: false,
+    });
+
     const disposables: vscode.Disposable[] = [this.emitter];
 
     if (vscode.workspace?.onDidChangeConfiguration) {
@@ -43,52 +104,50 @@ export class ZMcpServerDefinitionProvider implements vscode.McpServerDefinitionP
     }
 
     this.context.subscriptions.push(...disposables);
+    this.context.subscriptions.push(this.mcpRegistry);
 
     queueMicrotask(() => this.emitter.fire(undefined));
   }
 
   async provideMcpServerDefinitions(_token: vscode.CancellationToken): Promise<vscode.McpServerDefinition[]> {
-    const config = vscode.workspace.getConfiguration('zModels');
-    const servers: vscode.McpServerDefinition[] = [];
-    const searchUri = vscode.Uri.parse(MCP_URLS.search);
-    const readerUri = vscode.Uri.parse(MCP_URLS.reader);
-    const zreadUri = vscode.Uri.parse(MCP_URLS.zread);
+    await this.mcpRegistry.loadFromProviders();
 
-    if (config.get<boolean>('mcpServers.search', true)) {
-      servers.push(new vscode.McpHttpServerDefinition('zSearch', searchUri, {}, MCP_SERVER_VERSION));
-    }
-    if (config.get<boolean>('mcpServers.reader', true)) {
-      servers.push(new vscode.McpHttpServerDefinition('zReader', readerUri, {}, MCP_SERVER_VERSION));
-    }
-    if (config.get<boolean>('mcpServers.zread', true)) {
-      servers.push(new vscode.McpHttpServerDefinition('zRead', zreadUri, {}, MCP_SERVER_VERSION));
-    }
-    if (config.get<boolean>('mcpServers.vision', true)) {
-      servers.push(
-        new vscode.McpStdioServerDefinition(
-          'zVision',
-          VISION_MCP_COMMAND,
-          VISION_MCP_ARGS,
-          { Z_AI_MODE: 'ZAI' },
+    return this.mcpRegistry.getAll().map(server => {
+      if (server.command.startsWith('http://') || server.command.startsWith('https://')) {
+        return new vscode.McpHttpServerDefinition(
+          server.name,
+          vscode.Uri.parse(server.command),
+          server.headers ?? {},
           MCP_SERVER_VERSION,
-        ),
-      );
-    }
+        );
+      }
 
-    return servers;
+      return new vscode.McpStdioServerDefinition(
+        server.name,
+        server.command,
+        server.args ?? [],
+        server.env ?? {},
+        MCP_SERVER_VERSION,
+      );
+    });
   }
 
   async resolveMcpServerDefinition(
     server: vscode.McpServerDefinition,
     _token: vscode.CancellationToken,
   ): Promise<vscode.McpServerDefinition | undefined> {
-    const apiKey = this.context.secrets?.get ? await this.context.secrets.get('Z_API_KEY') : undefined;
+    const managerKey = this.apiKeyManager ? await this.apiKeyManager.getApiKey() : undefined;
+    const apiKey = managerKey ?? (this.context.secrets?.get ? await this.context.secrets.get('Z_API_KEY') : undefined);
     if (!apiKey) {
       return undefined;
     }
 
     if (server instanceof vscode.McpHttpServerDefinition) {
-      server.headers = { ...server.headers, Authorization: `Bearer ${apiKey}` };
+      server.headers = {
+        ...server.headers,
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Language': 'en-US,en',
+      };
       return server;
     }
 
