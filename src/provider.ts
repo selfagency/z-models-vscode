@@ -720,7 +720,15 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const retry = {
       limit: MAX_RETRIES,
       statusCodes: RETRYABLE_STATUS_CODES,
-      calculateDelay: ({ attemptCount, error, retryOptions }: { attemptCount: number; error: { response?: { statusCode?: number } }; retryOptions: { limit: number; statusCodes: number[] } }) => {
+      calculateDelay: ({
+        attemptCount,
+        error,
+        retryOptions,
+      }: {
+        attemptCount: number;
+        error: { response?: { statusCode?: number } };
+        retryOptions: { limit: number; statusCodes: number[] };
+      }) => {
         if (attemptCount > retryOptions.limit) {
           return 0;
         }
@@ -848,7 +856,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
                               typeof delta?.content === 'string'
                                 ? delta.content
                                 : Array.isArray(delta?.content)
-                                  ? delta.content.map((c: { text?: string }) => (typeof c?.text === 'string' ? c.text : '')).join('')
+                                  ? delta.content
+                                      .map((c: { text?: string }) => (typeof c?.text === 'string' ? c.text : ''))
+                                      .join('')
                                   : undefined,
                             reasoning_content:
                               typeof delta?.reasoning_content === 'string' ? delta.reasoning_content : undefined,
@@ -1178,8 +1188,12 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         return getKnownTokenLimits(modelId);
       }
 
-      interface ModelLimitResponse { context_window?: number; max_tokens?: number; max_completion_tokens?: number }
-      const response = (await got
+      interface ModelLimitResponse {
+        context_window?: number;
+        max_tokens?: number;
+        max_completion_tokens?: number;
+      }
+      const response = await got
         .get(`${baseUrl}/models/${modelId}`, {
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -1188,7 +1202,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           },
           signal: abortSignal,
         })
-        .json<ModelLimitResponse>());
+        .json<ModelLimitResponse>();
 
       return {
         maxInputTokens: response.context_window ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxInputTokens,
@@ -1626,7 +1640,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             this.usageMetrics.cachedTokens = normUsageExtra.cachedTokens;
           }
         }
-        const usage = (chunk?.data as { usage?: { prompt_tokens_details?: { cached_tokens?: number } } } | undefined)?.usage;
+        const usage = (chunk?.data as { usage?: { prompt_tokens_details?: { cached_tokens?: number } } } | undefined)
+          ?.usage;
         const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
         if (typeof cachedTokens === 'number') {
           this.log.debug(`[Z] cached prompt tokens: ${cachedTokens}`);
@@ -1839,6 +1854,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const role = toZRole(msg.role);
       const textParts: string[] = [];
       const imageParts: Array<{ mimeType: string; data: Uint8Array }> = [];
+      const videoParts: Array<{ mimeType: string; data: Uint8Array }> = [];
+      const fileParts: Array<{ mimeType: string; data: Uint8Array }> = [];
       const toolCalls: ZToolCall[] = [];
       const toolResults: Array<{ callId: string; content: string }> = [];
 
@@ -1901,11 +1918,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             this.toolCallIdMapping.set(part.callId, zId);
             this.reverseToolCallIdMapping.set(zId, part.callId);
           }
-          const resultText =
-            part.content
-              .filter(p => p instanceof LanguageModelTextPart)
-              .map(p => (p as LanguageModelTextPart).value)
-              .join('');
+          const resultText = part.content
+            .filter(p => p instanceof LanguageModelTextPart)
+            .map(p => (p as LanguageModelTextPart).value)
+            .join('');
           const truncatedResult =
             resultText && resultText.length > 0
               ? ZChatModelProvider.truncateText(resultText, MAX_TOOL_RESULT_CHARS)
@@ -1922,8 +1938,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const hasContent = content.length > 0;
       const hasToolCalls = toolCalls.length > 0;
       const hasImages = imageParts.length > 0;
+      const hasVideo = videoParts.length > 0;
+      const hasFiles = fileParts.length > 0;
 
-      const canSendMultimodal = hasImages;
+      const canSendMultimodal = hasImages || hasVideo || hasFiles;
       let messageContent: ZMessage['content'] | undefined = undefined;
       if (canSendMultimodal) {
         // Z expects a chunk-array for multimodal messages.
@@ -2089,8 +2107,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
 
     try {
-      interface TokenizerResponse { usage?: { total_tokens?: number } }
-      const response = (await got
+      interface TokenizerResponse {
+        usage?: { total_tokens?: number };
+      }
+      const response = await got
         .post(`${baseUrl}/tokenizer`, {
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -2108,7 +2128,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             statusCodes: RETRYABLE_STATUS_CODES,
           },
         })
-        .json<TokenizerResponse>());
+        .json<TokenizerResponse>();
 
       const totalTokens = response?.usage?.total_tokens;
       if (typeof totalTokens === 'number') {

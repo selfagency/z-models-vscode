@@ -353,13 +353,30 @@ describe('ZChatModelProvider — tool call ID mapping', () => {
 // ── fetchModels ───────────────────────────────────────────────────────────
 
 describe('fetchModels', () => {
+  let provider: ZChatModelProvider;
+
+  beforeEach(() => {
+    provider = new ZChatModelProvider(mockContext, undefined, false);
+  });
+
   it('maps API fields to ZModel correctly', async () => {
+    const chatModel = {
+      id: 'glm-large-latest',
+      name: 'Z Large',
+      detail: 'Flagship model',
+      maxInputTokens: 128000,
+      maxOutputTokens: 16384,
+      toolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsVision: true,
+    };
     const mockList = vi.fn().mockResolvedValue({ data: [chatModel] });
     (provider as any).client = { models: { list: mockList } };
 
-    const [model] = await provider.fetchModels();
-    expect(model.name).toBe('Z Large');
-    expect(model.detail).toBe('Flagship model');
+    const models = await provider.fetchModels();
+    expect(models).toHaveLength(1);
+    expect(models[0].name).toBe('Z Large');
+    expect(models[0].detail).toBe('Flagship model');
   });
 
   it('infers tool calling for bare GLM models when the API only returns ids', async () => {
@@ -487,7 +504,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msgs = provider.toZMessages([assistantMsg(toolCall)]);
 
     expect(msgs).toHaveLength(1);
-    const msg = msgs[0] as LanguageModelChatMessage;
+    const msg = msgs[0] as any;
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBeNull();
     expect(msg.tool_calls).toHaveLength(1);
@@ -502,7 +519,7 @@ describe('ZChatModelProvider — toZMessages', () => {
 
     const msgs = provider.toZMessages([assistantMsg(toolCall), userMsg(toolResult)]);
 
-    const toolMsg = msgs.find((m: any) => m.role === 'tool') as LanguageModelChatMessage;
+    const toolMsg = msgs.find((m: any) => m.role === 'tool') as any;
     expect(toolMsg).toBeDefined();
     expect(toolMsg.content).toBe('file contents');
     expect(typeof toolMsg.tool_call_id).toBe('string');
@@ -513,7 +530,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const toolResult = new LanguageModelToolResultPart('id-3', [new LanguageModelTextPart('result text')]);
 
     const msgs = provider.toZMessages([assistantMsg(toolCall), userMsg(toolResult)]);
-    const toolMsg = msgs.find((m: any) => m.role === 'tool') as LanguageModelChatMessage;
+    const toolMsg = msgs.find((m: any) => m.role === 'tool') as any;
     expect(toolMsg.content).toBe('result text');
   });
 
@@ -553,7 +570,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const toolCall = new LanguageModelToolCallPart('id-4', 'fn', {});
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('thinking...'), toolCall)]);
 
-    const msg = msgs[0] as LanguageModelChatMessage;
+    const msg = msgs[0] as any;
     expect(msg.content).toBe('thinking...');
     expect(msg.tool_calls).toHaveLength(1);
   });
@@ -568,7 +585,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('Here is my answer'))]);
 
     expect(msgs).toHaveLength(1);
-    const msg = msgs[0] as LanguageModelChatMessage;
+    const msg = msgs[0] as any;
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBe('Here is my answer');
     expect(msg.reasoning_content).toBe('Model is thinking about the problem...');
@@ -584,7 +601,7 @@ describe('ZChatModelProvider — toZMessages', () => {
     const msgs = provider.toZMessages([assistantMsg(new LanguageModelTextPart('Answer'))]);
 
     expect(msgs).toHaveLength(1);
-    const msg = msgs[0] as LanguageModelChatMessage;
+    const msg = msgs[0] as any;
     expect(msg.reasoning_content).toBeUndefined();
   });
 });
@@ -1743,9 +1760,9 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
     };
   });
 
-  it('strips  blocks — only clean content reaches progress.report', async () => {
+  it('strips <think> blocks — only clean content reaches progress.report', async () => {
     const rawChunks = [
-      { content: 'Let me reason through this.Hello' },
+      { content: '<think>Let me reason through this.</think>Hello' },
       { content: ' world', finishReason: 'stop' },
     ];
     (provider as any).client.chat.stream.mockResolvedValue(makeStream(...rawChunks));
@@ -1762,8 +1779,8 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
     );
 
     const combined = reported.join('');
-    expect(combined).not.toContain('');
-    expect(combined).not.toContain('');
+    expect(combined).not.toContain('<think>');
+    expect(combined).not.toContain('</think>');
     expect(combined).not.toContain('Let me reason through this.');
     expect(combined).toBe('Hello world');
   });
@@ -1787,7 +1804,7 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
   });
 
   it('handles response that is entirely a think block with no output content', async () => {
-    const rawChunks = [{ content: 'internal reasoning only', finishReason: 'stop' }];
+    const rawChunks = [{ content: '<think>internal reasoning only</think>', finishReason: 'stop' }];
     (provider as any).client.chat.stream.mockResolvedValue(makeStream(...rawChunks));
 
     const textReports: string[] = [];
@@ -1806,14 +1823,15 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
     );
 
     const combined = textReports.join('');
-    expect(combined).not.toContain('');
+    expect(combined).not.toContain('<think>');
+    expect(combined).not.toContain('</think>');
     expect(combined).not.toContain('internal reasoning only');
   });
 
   it('handles multi-chunk think block split across stream events', async () => {
     const rawChunks = [
-      { content: 'step one' },
-      { content: ' step twoResult' },
+      { content: '<think>step one' },
+      { content: ' step two</think>Result' },
       { content: ' here', finishReason: 'stop' },
     ];
     (provider as any).client.chat.stream.mockResolvedValue(makeStream(...rawChunks));
@@ -1830,7 +1848,8 @@ describe('provideLanguageModelChatResponse — thinking extraction', () => {
     );
 
     const combined = reported.join('');
-    expect(combined).not.toContain('');
+    expect(combined).not.toContain('<think>');
+    expect(combined).not.toContain('</think>');
     expect(combined).not.toContain('step one');
     expect(combined).not.toContain('step two');
     expect(combined).toContain('Result');
