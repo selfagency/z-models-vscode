@@ -580,47 +580,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     return false;
   }
 
-  private hasVideoInput(messages: readonly LanguageModelChatMessage[]): boolean {
-    for (const msg of messages) {
-      for (const part of msg.content) {
-        if (part instanceof LanguageModelDataPart && part.mimeType?.startsWith('video/')) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  private hasFileInput(messages: readonly LanguageModelChatMessage[]): boolean {
-    // Document MIME types that should be handled as file_url chunks
-    const documentMimeTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain',
-      'text/csv',
-      'text/markdown',
-    ];
-    for (const msg of messages) {
-      for (const part of msg.content) {
-        if (part instanceof LanguageModelDataPart) {
-          const mimeType = part.mimeType?.toLowerCase();
-          if (
-            mimeType &&
-            documentMimeTypes.some(type => mimeType === type || mimeType.startsWith(type.split('/')[0] + '/'))
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-    return false;
-  }
-
   private findVisionMcpToolName(tools: readonly { name: string }[] | undefined): string | undefined {
     if (!Array.isArray(tools) || tools.length === 0) {
       return undefined;
@@ -1012,7 +971,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     // Smart-default clear_thinking based on endpoint: disabled (false) for coding, enabled (true) for general
     const isOnCodingEndpoint = this.getConfiguredBaseUrl().includes('/coding/');
-    const defaultClearThinking = isOnCodingEndpoint ? false : true;
+    const defaultClearThinking = !isOnCodingEndpoint;
     const finalClearThinking = clearThinking !== undefined ? clearThinking : defaultClearThinking;
 
     const compulsoryThinking = modelThinksCompulsorily(foundModel.id);
@@ -1880,8 +1839,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const role = toZRole(msg.role);
       const textParts: string[] = [];
       const imageParts: Array<{ mimeType: string; data: Uint8Array }> = [];
-      const videoParts: Array<{ mimeType: string; data: Uint8Array }> = [];
-      const fileParts: Array<{ mimeType: string; data: Uint8Array }> = [];
       const toolCalls: ZToolCall[] = [];
       const toolResults: Array<{ callId: string; content: string }> = [];
 
@@ -1944,10 +1901,11 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             this.toolCallIdMapping.set(part.callId, zId);
             this.reverseToolCallIdMapping.set(zId, part.callId);
           }
-          const resultText = part.content
-            .filter(p => p instanceof LanguageModelTextPart)
-            .map(p => (p as LanguageModelTextPart).value)
-            .join('');
+          const resultText =
+            part.content
+              .filter(p => p instanceof LanguageModelTextPart)
+              .map(p => (p as LanguageModelTextPart).value)
+              .join('');
           const truncatedResult =
             resultText && resultText.length > 0
               ? ZChatModelProvider.truncateText(resultText, MAX_TOOL_RESULT_CHARS)
@@ -1964,10 +1922,8 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const hasContent = content.length > 0;
       const hasToolCalls = toolCalls.length > 0;
       const hasImages = imageParts.length > 0;
-      const hasVideos = videoParts.length > 0;
-      const hasFiles = fileParts.length > 0;
 
-      const canSendMultimodal = hasImages || hasVideos || hasFiles;
+      const canSendMultimodal = hasImages;
       let messageContent: ZMessage['content'] | undefined = undefined;
       if (canSendMultimodal) {
         // Z expects a chunk-array for multimodal messages.
