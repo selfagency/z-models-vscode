@@ -226,5 +226,6 @@
   "engines": {
     "vscode": "^1.109.0"
   },
+  "enabledApiProposals": ["languageModelThinkingPart"],
   "icon": "logo.png"
 }

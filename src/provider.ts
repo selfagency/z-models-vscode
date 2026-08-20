@@ -15,6 +15,7 @@ import {
 import got from 'got';
 import { randomUUID } from 'node:crypto';
 import { get_encoding, Tiktoken } from 'tiktoken';
+import * as vscode from 'vscode';
 import {
   CancellationToken,
   Event,
@@ -43,7 +44,7 @@ import { toZRole } from './role-utils.js';
  * LanguageModelThinkingPart is a proposed API for emitting thinking/reasoning content.
  * This is a local implementation until it's part of the stable vscode API.
  */
-class LanguageModelThinkingPart {
+export class LanguageModelThinkingPart {
   constructor(public readonly value: string) {}
 }
 
@@ -57,7 +58,7 @@ interface ProgressChatStream {
    */
 }
 
-function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
+export function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
   return {
     markdown(content: string): void {
       if (content.length > 0) {
@@ -72,7 +73,12 @@ function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePar
     thinkingProgress(delta: { text?: string | string[]; id?: string; metadata?: Record<string, unknown> }): void {
       const thinking = Array.isArray(delta.text) ? delta.text.join('') : (delta.text ?? '');
       if (thinking.length > 0) {
-        progress.report(new LanguageModelThinkingPart(thinking));
+        const VSCodeThinkingPart = (vscode as any).LanguageModelThinkingPart;
+        if (VSCodeThinkingPart) {
+          progress.report(new VSCodeThinkingPart(thinking));
+        } else {
+          progress.report(new LanguageModelThinkingPart(thinking)); // local fallback
+        }
       }
     },
   };
