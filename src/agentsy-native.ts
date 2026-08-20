@@ -652,8 +652,6 @@ export class UsageStatusBar {
     if (!this.statusBarItem) return;
     const item = this.statusBarItem;
     const percent = Math.round(quota.percentUsed * 100);
-    const warning = this.config.warningThreshold ?? DEFAULT_WARNING_THRESHOLD;
-    const error = this.config.errorThreshold ?? DEFAULT_ERROR_THRESHOLD;
     item.text = `$(pulse) ${this.config.displayName}: ${quota.used.toLocaleString()} / ${quota.total.toLocaleString()} ${quota.unit}`;
     const template = this.config.tooltipTemplate ?? DEFAULT_TOOLTIP;
     item.tooltip = template
@@ -661,14 +659,17 @@ export class UsageStatusBar {
       .replace('{{total}}', quota.total.toLocaleString())
       .replace('{{unit}}', quota.unit)
       .replace('{{percent}}', String(percent));
+    item.color = this.pickColor(quota.percentUsed);
+  }
+
+  private pickColor(percentUsed: number): string | undefined {
     const colorScheme = this.config.colorScheme;
-    if (quota.percentUsed >= error) {
-      if (colorScheme) item.color = colorScheme.error;
-    } else if (quota.percentUsed >= warning) {
-      if (colorScheme) item.color = colorScheme.warning;
-    } else {
-      if (colorScheme) item.color = colorScheme.normal;
-    }
+    if (!colorScheme) return undefined;
+    const warning = this.config.warningThreshold ?? DEFAULT_WARNING_THRESHOLD;
+    const error = this.config.errorThreshold ?? DEFAULT_ERROR_THRESHOLD;
+    if (percentUsed >= error) return colorScheme.error;
+    if (percentUsed >= warning) return colorScheme.warning;
+    return colorScheme.normal;
   }
 
   hide(): void {
@@ -753,39 +754,44 @@ function resolveEnabled(
   return defaultEnabled;
 }
 
+function enrichServer(
+  server: McpProviderServerDefinition,
+  apiKey: string | undefined,
+  options: CreateMcpServerDefinitionProviderOptions,
+  defaultEnabled: boolean,
+): McpServerDefinition {
+  const enabled = resolveEnabled(server, options.settings, defaultEnabled);
+  const env = { ...server.env };
+  const headers = { ...server.headers };
+  if (typeof apiKey === 'string' && apiKey.length > 0) {
+    const envKey = server.apiKeyEnvVar ?? options.defaultApiKeyEnvVar;
+    if (typeof envKey === 'string' && envKey.length > 0) {
+      env[envKey] = apiKey;
+    }
+    const headerKey = server.apiKeyHeader ?? options.defaultApiKeyHeader;
+    if (typeof headerKey === 'string' && headerKey.length > 0) {
+      headers[headerKey] = (options.formatApiKeyHeaderValue ?? ((k: string) => k))(apiKey);
+    }
+  }
+  return {
+    name: server.name,
+    command: server.command,
+    ...(server.args === undefined ? {} : { args: server.args }),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(server.alwaysAllow ? { alwaysAllow: true } : {}),
+    ...(enabled ? {} : { disabled: true }),
+  };
+}
+
 /** Creates an MCP server-definition provider with built-in auth and settings enrichment. */
 export function createMcpServerDefinitionProvider(options: CreateMcpServerDefinitionProviderOptions): McpServerProvider {
   const defaultEnabled = options.defaultEnabled ?? true;
-  const formatHeader = options.formatApiKeyHeaderValue ?? ((apiKey: string) => apiKey);
   return {
     async provide() {
       const rawServers = typeof options.servers === 'function' ? await options.servers() : options.servers;
       const apiKey = await options.getApiKey?.();
-      return rawServers.map(server => {
-        const enabled = resolveEnabled(server, options.settings, defaultEnabled);
-        const env = { ...server.env };
-        const headers = { ...server.headers };
-        if (typeof apiKey === 'string' && apiKey.length > 0) {
-          const envKey = server.apiKeyEnvVar ?? options.defaultApiKeyEnvVar;
-          if (typeof envKey === 'string' && envKey.length > 0) {
-            env[envKey] = apiKey;
-          }
-          const headerKey = server.apiKeyHeader ?? options.defaultApiKeyHeader;
-          if (typeof headerKey === 'string' && headerKey.length > 0) {
-            headers[headerKey] = formatHeader(apiKey);
-          }
-        }
-        const enriched: McpServerDefinition = {
-          name: server.name,
-          command: server.command,
-          ...(server.args === undefined ? {} : { args: server.args }),
-          ...(Object.keys(env).length > 0 ? { env } : {}),
-          ...(Object.keys(headers).length > 0 ? { headers } : {}),
-          ...(server.alwaysAllow ? { alwaysAllow: true } : {}),
-          ...(enabled ? {} : { disabled: true }),
-        };
-        return enriched;
-      });
+      return rawServers.map(server => enrichServer(server, apiKey, options, defaultEnabled));
     },
   };
 }
