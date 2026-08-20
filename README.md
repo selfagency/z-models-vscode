@@ -18,22 +18,15 @@
 
 ## ✨ Features
 
-- 🧠 **Coding Plan Models** - Uses models exposed by the Z.ai Coding endpoint for Coding Plan usage
+- 🧠 **Z.ai Models** - Access Z.ai (GLM) models in Copilot Chat, including Coding Plan and general Z.ai API endpoints
 - 🔀 **Model Picker** - Select Z models via the model selector dropdown on any Copilot Chat conversation
 - 💬 **Chat Participant** - Invoke `@z` directly in Copilot Chat for a dedicated, history-aware Z conversation
 - 🔧 **Tool Calling** - Function calling support for agentic workflows
-- 🖼️ **Vision via MCP** - Image understanding is routed through the Vision MCP server in coding workflows
+- 🌐 **First-Party Web Tools** - `webSearch` and `webFetch` language model tools that call the Z.ai API directly
+- 🖼️ **Vision via MCP** - Image understanding is routed through the Vision MCP server
 - 🔒 **Secure** - API key stored using VS Code's encrypted secrets API
 - ⚡ **Streaming** - Real-time response streaming for faster interactions
 - 📊 **Usage Status Bar** - Status bar item tracks subscription usage limits
-
-## ⚠️ For Coding Plan users only
-
-Due to Z.ai Coding Plan restrictions, this extension is intentionally scoped to coding usage:
-
-- It uses the dedicated Coding endpoint: `https://api.z.ai/api/coding/paas/v4`
-- It only supports Coding Plan model availability (coding models), not the full general API catalog
-- Vision/image workflows are provided through the Vision MCP server
 
 ## 🔧 Requirements
 
@@ -47,7 +40,6 @@ Due to Z.ai Coding Plan restrictions, this extension is intentionally scoped to 
 2. **Open Command Palette** (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 3. **Run:** `Z: Manage API Key`
 4. **Enter your API key** from [z.ai](https://z.ai/manage-apikey/apikey-list)
-5. *(Optional)* **Run:** `Z: Manage Settings` to view coding-endpoint behavior details
 
 ## 🔑 Getting Your API Key
 
@@ -105,6 +97,7 @@ This provider supports the following `modelOptions` keys (used internally by VS 
 - `doSample: boolean` (alias: `do_sample`)
 - `stop: string[]` (only the first stop string is sent)
 - `userId: string` (alias: `user_id`; must be 6–128 characters)
+- `reasoningEffort: string` (alias: `reasoning_effort`; GLM-5.2+ only; values `max`|`xhigh`|`high`|`medium`|`low`|`minimal`|`none`; only applied when thinking is enabled)
 
 Thinking controls:
 
@@ -146,7 +139,9 @@ This extension supports Model Context Protocol (MCP) servers for enhanced capabi
 - **Reader MCP**: Document reading and PDF processing
 - **ZRead MCP**: Advanced reading and contextual analysis
 
-When an image is attached in chat and Vision MCP is enabled, the extension prefers MCP-based image analysis for Coding Plan compatibility.
+When an image is attached in chat and Vision MCP is enabled, the extension prefers MCP-based image analysis.
+
+Alternatively, the first-party `webSearch` and `webFetch` language model tools (see [First-Party Web Tools](#first-party-web-tools)) call the Z.ai API directly and work without MCP servers.
 
 ### Configure MCP Servers
 
@@ -169,6 +164,18 @@ You can enable/disable MCP servers in VS Code settings:
   - MCP server definitions are registered eagerly, but they are only resolvable/startable after a valid API key is stored.
   - MCP registration depends on VS Code builds that include MCP provider APIs. In builds without that API, the extension still works for chat/models, but MCP server registration is skipped.
 
+## 🌐 First-Party Web Tools
+
+Beyond the MCP servers, the extension registers two first-party language model tools that call the Z.ai API directly and can be referenced in prompts or used by agentic models:
+
+- **`z_webSearch`** (`webSearch`) - Search the web and return results using Z.ai's search engine.
+- **`z_webFetch`** (`webFetch`) - Fetch a URL and return its readable text content (bounded to ~200KB, http(s) only).
+
+Both are enabled by default and can be toggled via settings:
+
+- `zModels.tools.webSearch` - Enable the `webSearch` language model tool
+- `zModels.tools.webFetch` - Enable the `webFetch` language model tool
+
 ## 🛠️ Development
 
 ### Prerequisites
@@ -184,6 +191,8 @@ pnpm install
 pnpm run compile        # type-check + lint + bundle
 pnpm run watch          # parallel watch for type-check and bundle
 ```
+
+> **Note:** `dist/` is gitignored. Rebuild (`pnpm run compile` or `pnpm run package`) before running the integration tests or launching the debug host, or you may load a stale bundle.
 
 ### Testing
 
