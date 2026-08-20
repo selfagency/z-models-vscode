@@ -138,9 +138,9 @@ const ENTITY_MAP: Record<string, string> = {
 };
 
 export function stripHtml(html: string): string {
+  html = removeElementBlocks(html, '<script', '</script');
+  html = removeElementBlocks(html, '<style', '</style');
   return html
-    .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, ' ')
-    .replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     // single-pass decode so a decoded '&' is never re-scanned by later decodes
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/gi, (match, name: string) => {
@@ -149,6 +149,38 @@ export function stripHtml(html: string): string {
     })
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Remove an element block (e.g. <script>...</script>) by scanning linearly with
+ * indexOf. Avoids regex with `[\s\S]*?` or `<[^>]+>` super-linear backtracking.
+ */
+function removeElementBlocks(html: string, open: string, closePrefix: string): string {
+  let out = '';
+  let i = 0;
+  const lower = html.toLowerCase();
+  while (i < html.length) {
+    const start = lower.indexOf(open, i);
+    if (start === -1) {
+      out += html.slice(i);
+      break;
+    }
+    out += html.slice(i, start);
+    const end = lower.indexOf(closePrefix, start);
+    if (end === -1) {
+      out += html.slice(start);
+      break;
+    }
+    // consume through '>'
+    const gt = html.indexOf('>', end);
+    if (gt === -1) {
+      out += html.slice(start);
+      break;
+    }
+    out += ' ';
+    i = gt + 1;
+  }
+  return out;
 }
 
 /**
