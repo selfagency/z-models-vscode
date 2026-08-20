@@ -128,6 +128,7 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'glm-5.1': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
+  'glm-5.2': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.2
 
   // GLM-4.7 series (Preserved Thinking enabled by default)
   'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
