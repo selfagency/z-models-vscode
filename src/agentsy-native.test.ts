@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import { commands, window } from 'vscode';
 import {
   ApiKeyManager,

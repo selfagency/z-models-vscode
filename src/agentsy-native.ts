@@ -754,25 +754,38 @@ function resolveEnabled(
   return defaultEnabled;
 }
 
-function enrichServer(
+function injectAuthIntoEnv(
+  env: Record<string, string>,
   server: McpProviderServerDefinition,
   apiKey: string | undefined,
   options: CreateMcpServerDefinitionProviderOptions,
-  defaultEnabled: boolean,
-): McpServerDefinition {
-  const enabled = resolveEnabled(server, options.settings, defaultEnabled);
-  const env = { ...server.env };
-  const headers = { ...server.headers };
-  if (typeof apiKey === 'string' && apiKey.length > 0) {
-    const envKey = server.apiKeyEnvVar ?? options.defaultApiKeyEnvVar;
-    if (typeof envKey === 'string' && envKey.length > 0) {
-      env[envKey] = apiKey;
-    }
-    const headerKey = server.apiKeyHeader ?? options.defaultApiKeyHeader;
-    if (typeof headerKey === 'string' && headerKey.length > 0) {
-      headers[headerKey] = (options.formatApiKeyHeaderValue ?? ((k: string) => k))(apiKey);
-    }
+): void {
+  if (typeof apiKey !== 'string' || apiKey.length === 0) return;
+  const envKey = server.apiKeyEnvVar ?? options.defaultApiKeyEnvVar;
+  if (typeof envKey === 'string' && envKey.length > 0) {
+    env[envKey] = apiKey;
   }
+}
+
+function injectAuthHeader(
+  headers: Record<string, string>,
+  server: McpProviderServerDefinition,
+  apiKey: string | undefined,
+  options: CreateMcpServerDefinitionProviderOptions,
+): void {
+  if (typeof apiKey !== 'string' || apiKey.length === 0) return;
+  const headerKey = server.apiKeyHeader ?? options.defaultApiKeyHeader;
+  if (typeof headerKey === 'string' && headerKey.length > 0) {
+    headers[headerKey] = (options.formatApiKeyHeaderValue ?? ((k: string) => k))(apiKey);
+  }
+}
+
+function toServerDefinition(
+  server: McpProviderServerDefinition,
+  env: Record<string, string>,
+  headers: Record<string, string>,
+  enabled: boolean,
+): McpServerDefinition {
   return {
     name: server.name,
     command: server.command,
@@ -782,6 +795,20 @@ function enrichServer(
     ...(server.alwaysAllow ? { alwaysAllow: true } : {}),
     ...(enabled ? {} : { disabled: true }),
   };
+}
+
+function enrichServer(
+  server: McpProviderServerDefinition,
+  apiKey: string | undefined,
+  options: CreateMcpServerDefinitionProviderOptions,
+  defaultEnabled: boolean,
+): McpServerDefinition {
+  const enabled = resolveEnabled(server, options.settings, defaultEnabled);
+  const env = { ...server.env };
+  const headers = { ...server.headers };
+  injectAuthIntoEnv(env, server, apiKey, options);
+  injectAuthHeader(headers, server, apiKey, options);
+  return toServerDefinition(server, env, headers, enabled);
 }
 
 /** Creates an MCP server-definition provider with built-in auth and settings enrichment. */
