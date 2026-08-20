@@ -111,6 +111,20 @@ const ENDPOINT_PRESETS: Record<string, string> = {
   bigmodelCoding: 'https://open.bigmodel.cn/api/coding/paas/v4',
 };
 
+/**
+ * Resolve the configured Z.ai API base URL from VS Code settings.
+ * Shared by the chat provider and first-party language model tools.
+ */
+export function getConfiguredBaseUrl(): string {
+  const config = workspace.getConfiguration('zModels');
+  const baseUrlOverride = config.get<string>('api.baseUrlOverride', '').trim();
+  if (baseUrlOverride) {
+    return baseUrlOverride;
+  }
+  const endpointMode = config.get<string>('api.endpointMode', 'zaiCoding');
+  return ENDPOINT_PRESETS[endpointMode] ?? ENDPOINT_PRESETS.zaiCoding;
+}
+
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
@@ -473,13 +487,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>;
 
   private getConfiguredBaseUrl(): string {
-    const config = workspace.getConfiguration('zModels');
-    const baseUrlOverride = config.get<string>('api.baseUrlOverride', '').trim();
-    if (baseUrlOverride) {
-      return baseUrlOverride;
-    }
-    const endpointMode = config.get<string>('api.endpointMode', 'zaiCoding');
-    return ENDPOINT_PRESETS[endpointMode] ?? ENDPOINT_PRESETS.zaiCoding;
+    return getConfiguredBaseUrl();
   }
 
   /**

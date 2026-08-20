@@ -153,6 +153,16 @@
           "default": 5,
           "minimum": 1,
           "description": "How often (in minutes) to refresh Z.ai usage data"
+        },
+        "zModels.tools.webSearch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the first-party Z.ai web search language model tool"
+        },
+        "zModels.tools.webFetch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the first-party Z.ai web fetch language model tool"
         }
       }
     },
@@ -169,6 +179,44 @@
       {
         "id": "zModels.mcpServers",
         "label": "Z.ai MCP Servers"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "z_webSearch",
+        "toolReferenceName": "webSearch",
+        "displayName": "Z.ai Web Search",
+        "modelDescription": "Search the web and return results using Z.ai's search engine",
+        "userDescription": "Search the web",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query"
+            }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "z_webFetch",
+        "toolReferenceName": "webFetch",
+        "displayName": "Z.ai Web Fetch",
+        "modelDescription": "Fetch a URL and return its text content",
+        "userDescription": "Fetch a web page",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL to fetch"
+            }
+          },
+          "required": ["url"]
+        }
       }
     ]
   },

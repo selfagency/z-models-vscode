@@ -88,6 +88,10 @@ export class LanguageModelToolResultPart {
   ) {}
 }
 
+export class LanguageModelToolResult {
+  constructor(public readonly content: LanguageModelTextPart[]) {}
+}
+
 export class LanguageModelDataPart {
   constructor(
     public readonly data: Uint8Array,
@@ -158,6 +162,7 @@ export const window = {
 export const lm = {
   registerLanguageModelChatProvider: vi.fn().mockReturnValue({ dispose: vi.fn() }),
   registerMcpServerDefinitionProvider: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+  registerTool: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 };
 
 export class McpHttpServerDefinition {

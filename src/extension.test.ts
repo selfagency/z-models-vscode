@@ -114,6 +114,39 @@ describe('extension', () => {
       (lm as any).registerMcpServerDefinitionProvider = old;
     });
 
+    it('registers both first-party language model tools by default', () => {
+      activate(mockContext);
+      expect(lm.registerTool).toHaveBeenCalledWith('z_webSearch', expect.any(Object));
+      expect(lm.registerTool).toHaveBeenCalledWith('z_webFetch', expect.any(Object));
+    });
+
+    it('skips tool registration when webSearch setting is disabled', () => {
+      const config = {
+        get: vi.fn((key: string, fallback: unknown) => {
+          if (key === 'tools') return { webSearch: false, webFetch: true };
+          return fallback;
+        }),
+        update: vi.fn().mockResolvedValue(undefined),
+      };
+      vi.spyOn(workspace, 'getConfiguration').mockReturnValue(config as any);
+
+      activate(mockContext);
+
+      expect(lm.registerTool).not.toHaveBeenCalledWith('z_webSearch', expect.any(Object));
+      expect(lm.registerTool).toHaveBeenCalledWith('z_webFetch', expect.any(Object));
+    });
+
+    it('logs warning when language model tool API is unavailable', () => {
+      const old = (lm as any).registerTool;
+      (lm as any).registerTool = undefined;
+
+      activate(mockContext);
+
+      const log = (window.createOutputChannel as ReturnType<typeof vi.fn>).mock.results.at(-1)?.value;
+      expect(log.warn).toHaveBeenCalled();
+      (lm as any).registerTool = old;
+    });
+
     it('executes manageSettings command and shows coding endpoint info', async () => {
       activate(mockContext);
       const call = (commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls.find(
