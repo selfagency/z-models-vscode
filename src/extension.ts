@@ -167,7 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!shownMcpWarning) {
         vscode.window
           .showWarningMessage(
-            'Z.ai Vision & Search tools require VS Code 1.95 or later. Please update VS Code to enable MCP servers.',
+            'Z.ai Vision & Search tools require VS Code 1.120 or later. Please update VS Code to enable MCP servers.',
             'Update VS Code',
             'Dismiss',
           )

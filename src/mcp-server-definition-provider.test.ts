@@ -36,7 +36,7 @@ describe('ZMcpServerDefinitionProvider', () => {
     const vision = servers[3] as McpStdioServerDefinition;
     expect(vision.label).toBe('zVision');
     expect(vision.command).toBe('npx');
-    expect(vision.args).toEqual(['-y', '@z_ai/mcp-server@latest']);
+    expect(vision.args).toEqual(['-y', '@z_ai/mcp-server@0.1.4']);
     expect(vision.env).toEqual({ Z_AI_MODE: 'ZAI' });
   });
 
@@ -55,7 +55,7 @@ describe('ZMcpServerDefinitionProvider', () => {
   it('resolves stdio vision server definitions by injecting required env vars from secret storage', async () => {
     vi.spyOn(mockContext.secrets, 'get').mockResolvedValue('secret-key');
     const provider = new ZMcpServerDefinitionProvider(mockContext);
-    const server = new McpStdioServerDefinition('zVision', 'npx', ['-y', '@z_ai/mcp-server@latest'], {}, '1.0.0');
+    const server = new McpStdioServerDefinition('zVision', 'npx', ['-y', '@z_ai/mcp-server@0.1.4'], {}, '1.0.0');
 
     const resolved = await provider.resolveMcpServerDefinition(server as any, {} as any);
 
