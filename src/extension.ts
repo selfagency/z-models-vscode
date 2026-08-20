@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar } from '@agentsy/vscode';
+import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar } from './agentsy-native.js';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
+import { ZWebFetchTool, ZWebSearchTool } from './tools/web-tools.js';
 import { UsageService } from './usage-service.js';
 
 let activeProvider: ZChatModelProvider | undefined;
@@ -166,7 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!shownMcpWarning) {
         vscode.window
           .showWarningMessage(
-            'Z.ai Vision & Search tools require VS Code 1.95 or later. Please update VS Code to enable MCP servers.',
+            'Z.ai Vision & Search tools require VS Code 1.120 or later. Please update VS Code to enable MCP servers.',
             'Update VS Code',
             'Dismiss',
           )
@@ -178,6 +179,24 @@ export function activate(context: vscode.ExtensionContext) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown MCP registration error';
     logOutputChannel?.warn(`[Z] MCP registration unavailable in this VS Code build: ${message}`);
+  }
+
+  // Register first-party language model tools (guarded).
+  try {
+    if (vscode.lm?.registerTool) {
+      const toolsConfig = vscode.workspace.getConfiguration('zModels').get<{ webSearch?: boolean; webFetch?: boolean }>('tools', {});
+      if (toolsConfig.webSearch !== false) {
+        context.subscriptions.push(vscode.lm.registerTool('z_webSearch', new ZWebSearchTool({ context, apiKeyManager })));
+      }
+      if (toolsConfig.webFetch !== false) {
+        context.subscriptions.push(vscode.lm.registerTool('z_webFetch', new ZWebFetchTool()));
+      }
+    } else {
+      logOutputChannel?.warn('[Z] Language model tool API is unavailable in this VS Code build.');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown tool registration error';
+    logOutputChannel?.warn(`[Z] Failed to register language model tools: ${message}`);
   }
 
   if (logOutputChannel) {

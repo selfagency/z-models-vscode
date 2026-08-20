@@ -1,6 +1,6 @@
-import { createGenericAdapter } from '@agentsy/adapters';
-import { normalizeZAiChunk } from '@agentsy/normalizers';
-import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/tool-calls';
+import { createGenericAdapter } from '@agentsy/providers/adapters';
+import { normalizeZAiChunk } from '@agentsy/providers/normalizers';
+import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/core/tool-calls';
 import {
   calculateRetryDelay,
   cancellationTokenToAbortSignal,
@@ -11,10 +11,11 @@ import {
   isRetryableError,
   withRetry,
   type ApiKeyManager,
-} from '@agentsy/vscode';
+} from './agentsy-native.js';
 import got from 'got';
 import { randomUUID } from 'node:crypto';
 import { get_encoding, Tiktoken } from 'tiktoken';
+import * as vscode from 'vscode';
 import {
   CancellationToken,
   Event,
@@ -43,7 +44,7 @@ import { toZRole } from './role-utils.js';
  * LanguageModelThinkingPart is a proposed API for emitting thinking/reasoning content.
  * This is a local implementation until it's part of the stable vscode API.
  */
-class LanguageModelThinkingPart {
+export class LanguageModelThinkingPart {
   constructor(public readonly value: string) {}
 }
 
@@ -57,7 +58,7 @@ interface ProgressChatStream {
    */
 }
 
-function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
+export function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
   return {
     markdown(content: string): void {
       if (content.length > 0) {
@@ -72,7 +73,14 @@ function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePar
     thinkingProgress(delta: { text?: string | string[]; id?: string; metadata?: Record<string, unknown> }): void {
       const thinking = Array.isArray(delta.text) ? delta.text.join('') : (delta.text ?? '');
       if (thinking.length > 0) {
-        progress.report(new LanguageModelThinkingPart(thinking));
+        const VSCodeThinkingPart = (vscode as unknown as {
+          LanguageModelThinkingPart?: new (value: string) => unknown;
+        }).LanguageModelThinkingPart;
+        if (VSCodeThinkingPart) {
+          progress.report(new VSCodeThinkingPart(thinking) as LanguageModelResponsePartWithThinking);
+        } else {
+          progress.report(new LanguageModelThinkingPart(thinking)); // local fallback
+        }
       }
     },
   };
@@ -105,6 +113,20 @@ const ENDPOINT_PRESETS: Record<string, string> = {
   bigmodelCoding: 'https://open.bigmodel.cn/api/coding/paas/v4',
 };
 
+/**
+ * Resolve the configured Z.ai API base URL from VS Code settings.
+ * Shared by the chat provider and first-party language model tools.
+ */
+export function getConfiguredBaseUrl(): string {
+  const config = workspace.getConfiguration('zModels');
+  const baseUrlOverride = config.get<string>('api.baseUrlOverride', '').trim();
+  if (baseUrlOverride) {
+    return baseUrlOverride;
+  }
+  const endpointMode = config.get<string>('api.endpointMode', 'zaiCoding');
+  return ENDPOINT_PRESETS[endpointMode] ?? ENDPOINT_PRESETS.zaiCoding;
+}
+
 // Default completion tokens for rate limiting optimization
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
@@ -129,6 +151,7 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5.2': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.2
+  'glm-5.3': { maxInputTokens: 200_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3
 
   // GLM-4.7 series (Preserved Thinking enabled by default)
   'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
@@ -154,13 +177,13 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'autoglm-phone-multilingual': { maxInputTokens: 64_000, maxOutputTokens: 4_000 },
 };
 
-function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
+export function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
   const normalized = id.toLowerCase();
   return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
 }
 
-function modelThinksCompulsorily(modelId: string): boolean {
-  return /^glm-(?:5\.1|5(?:-turbo|v-turbo)?|4\.7)/i.test(modelId);
+export function modelThinksCompulsorily(modelId: string): boolean {
+  return /^glm-(?:5\.3|5\.2|5\.1|5(?:-turbo|v-turbo)?|4\.7)/i.test(modelId);
 }
 
 /**
@@ -407,6 +430,10 @@ export interface ZSupportedModelOptions {
   // Web search tool helper
   webSearch?: boolean | Record<string, unknown>;
   web_search?: boolean | Record<string, unknown>;
+
+  // Reasoning effort (GLM-5.2+)
+  reasoningEffort?: string;
+  reasoning_effort?: string;
 }
 
 interface ZParsedRequestOptions {
@@ -419,6 +446,7 @@ interface ZParsedRequestOptions {
   thinking?: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
   responseFormat?: { type: 'json_object' };
   webSearchTool?: { type: 'web_search'; web_search: Record<string, unknown> };
+  reasoningEffort?: string;
 }
 
 /**
@@ -461,13 +489,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>;
 
   private getConfiguredBaseUrl(): string {
-    const config = workspace.getConfiguration('zModels');
-    const baseUrlOverride = config.get<string>('api.baseUrlOverride', '').trim();
-    if (baseUrlOverride) {
-      return baseUrlOverride;
-    }
-    const endpointMode = config.get<string>('api.endpointMode', 'zaiCoding');
-    return ENDPOINT_PRESETS[endpointMode] ?? ENDPOINT_PRESETS.zaiCoding;
+    return getConfiguredBaseUrl();
   }
 
   /**
@@ -689,6 +711,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         temperature?: number;
         topP?: number;
         safePrompt?: boolean;
+        reasoningEffort?: string;
         abortSignal?: AbortSignal;
       }) => AsyncIterable<{
         data: {
@@ -797,6 +820,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           temperature,
           topP,
           safePrompt,
+          reasoningEffort,
           abortSignal,
         }) {
           const gotStream = got.stream.post(`${baseUrl}/chat/completions`, {
@@ -819,6 +843,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
               tool_stream: toolStream,
               thinking,
               response_format: responseFormat,
+              ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
               stream: true,
             },
           });
@@ -1027,6 +1052,34 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }
       : undefined;
 
+    // Reasoning effort (GLM-5.2+); only takes effect when thinking is enabled.
+    let rawReasoningEffort: string | undefined;
+    if (typeof modelOptions.reasoningEffort === 'string') {
+      rawReasoningEffort = modelOptions.reasoningEffort;
+    } else if (typeof modelOptions.reasoning_effort === 'string') {
+      rawReasoningEffort = modelOptions.reasoning_effort;
+    }
+    let reasoningEffort: string | undefined;
+    if (rawReasoningEffort && thinking?.type === 'enabled') {
+      const isGlm53 = /^glm-5\.3(?:[-_]|$)/i.test(foundModel.id);
+      const isGlm52Plus = /^glm-5\.[2-9]/i.test(foundModel.id);
+      let allowed: string[];
+      if (isGlm53) {
+        allowed = ['max', 'high', 'low'];
+      } else if (isGlm52Plus) {
+        allowed = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'];
+      } else {
+        allowed = [];
+      }
+      if (allowed.includes(rawReasoningEffort)) {
+        reasoningEffort = rawReasoningEffort;
+      } else {
+        this.log.warn(
+          `[Z] Model ${foundModel.id} does not support reasoning_effort='${rawReasoningEffort}'; ignoring.`,
+        );
+      }
+    }
+
     return {
       temperature,
       topP,
@@ -1037,6 +1090,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       thinking,
       responseFormat,
       webSearchTool,
+      reasoningEffort,
     };
   }
 
@@ -1206,9 +1260,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         .json<ModelLimitResponse>();
 
       return {
-        maxInputTokens: response.context_window ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxInputTokens,
+        maxInputTokens: response.context_window ?? getKnownTokenLimits(modelId).maxInputTokens,
         maxOutputTokens:
-          response.max_completion_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          response.max_completion_tokens ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       };
     } catch {
       // Fall back to known limits if API fetch fails
@@ -1553,7 +1607,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     // Allow VS Code modelOptions to override some request parameters.
     const parsedOptions = this.parseModelOptions(options.modelOptions, foundModel);
-    const { temperature, topP, safePrompt, doSample, stop, userId, thinking, responseFormat, webSearchTool } =
+    const { temperature, topP, safePrompt, doSample, stop, userId, thinking, responseFormat, webSearchTool, reasoningEffort } =
       parsedOptions;
     const requestId = randomUUID();
     this.log.info(`[Z] request_id=${requestId}`);
@@ -1582,6 +1636,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         toolStream: requestTools.length > 0 ? true : undefined,
         thinking,
         responseFormat,
+        reasoningEffort,
         abortSignal,
       });
 

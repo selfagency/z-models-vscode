@@ -37,7 +37,7 @@ Due to Z.ai Coding Plan restrictions, this extension is intentionally scoped to 
 
 ## 🔧 Requirements
 
-- **VS Code** 1.109.0 or higher
+- **VS Code** 1.120.0 or higher
 - **GitHub Copilot Chat** extension installed (required)
 - A valid **Z.ai API key**
 
@@ -175,7 +175,7 @@ You can enable/disable MCP servers in VS Code settings:
 
 - [Node.js](https://nodejs.org/) 20+
 - [pnpm](https://pnpm.io/) (version pinned in `package.json`)
-- [VS Code](https://code.visualstudio.com/) 1.109.0+
+- [VS Code](https://code.visualstudio.com/) 1.120.0+
 
 ### Build
 

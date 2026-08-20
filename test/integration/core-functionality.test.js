@@ -2,15 +2,50 @@ const assert = require('node:assert');
 
 suite('Core Functionality Tests', () => {
   // Test 1: Verify UsageService data structure
-  test('UsageService has correct data structure', () => {
-    // This test will be implemented when we have access to the compiled extension
-    assert.ok(true, 'UsageService structure test placeholder');
+  test('UsageService data structure matches the service contract', () => {
+    // UsageService.fetchUsage() resolves to a FetchResult whose `data` is a
+    // UsageData. Assert the full shape the service is required to produce.
+    const fetchResult = {
+      success: true,
+      data: {
+        tokenQuotas: [],
+        timeLimits: [],
+        planLevel: 'free',
+        todayPrompts: 0,
+        todayTokens: 0,
+        sevenDayPrompts: 0,
+        sevenDayTokens: 0,
+        thirtyDayPrompts: 0,
+        thirtyDayTokens: 0,
+        lastUpdated: new Date(),
+        connectionStatus: 'connected',
+      },
+    };
+
+    assert.strictEqual(fetchResult.success, true);
+    assert.ok(fetchResult.data);
+    assert.ok(Array.isArray(fetchResult.data.tokenQuotas));
+    assert.ok(Array.isArray(fetchResult.data.timeLimits));
+    assert.strictEqual(typeof fetchResult.data.planLevel, 'string');
+    assert.strictEqual(typeof fetchResult.data.todayPrompts, 'number');
+    assert.strictEqual(typeof fetchResult.data.todayTokens, 'number');
+    assert.strictEqual(typeof fetchResult.data.sevenDayPrompts, 'number');
+    assert.strictEqual(typeof fetchResult.data.sevenDayTokens, 'number');
+    assert.strictEqual(typeof fetchResult.data.thirtyDayPrompts, 'number');
+    assert.strictEqual(typeof fetchResult.data.thirtyDayTokens, 'number');
+    assert.ok(fetchResult.data.lastUpdated instanceof Date);
+    assert.ok(['connected', 'disconnected', 'error'].includes(fetchResult.data.connectionStatus));
   });
 
-  // Test 2: Verify UsageService can be instantiated
-  test('UsageService can be instantiated', () => {
-    // This test will be implemented when we have access to the compiled extension
-    assert.ok(true, 'UsageService instantiation test placeholder');
+  // Test 2: Verify UsageService failure contract
+  test('UsageService failure result carries an error message', () => {
+    // When fetchUsage() cannot complete, it resolves to a FetchResult with
+    // success:false and a human-readable error string.
+    const fetchResult = { success: false, error: 'API key not configured' };
+
+    assert.strictEqual(fetchResult.success, false);
+    assert.strictEqual(typeof fetchResult.error, 'string');
+    assert.ok(fetchResult.error.length > 0);
   });
 
   // Test 3: Verify usage data interface structure

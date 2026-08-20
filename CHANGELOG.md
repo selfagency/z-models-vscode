@@ -14,7 +14,7 @@ This major version release brings critical stability fixes, architectural improv
 - **Stronger Tool Call IDs** - Tool call IDs now use 128-bit cryptographically strong `randomUUID()` instead of 64-bit entropy
 - **User-Facing MCP Warning** - Clear warning message when MCP servers unavailable on older VS Code versions
 - **Thinking Content Logging** - Model reasoning/thinking content now logged to output channel when available
-- **Z.ai Normalizer Module** - New `src/normalizers/z-ai.ts` for SSE format normalization
+- **Z.ai Normalizer Module** - SSE format normalization via `normalizeZAiChunk` from `@agentsy/providers/normalizers`
 
 ### 🔧 Technical Improvements
 
