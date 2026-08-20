@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { commands, window } from 'vscode';
 import {
   ApiKeyManager,
@@ -112,7 +113,7 @@ describe('cancellationTokenToAbortSignal', () => {
 
 describe('ApiKeyManager', () => {
   let secrets: { get: ReturnType<typeof vi.fn>; store: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
-  let context: any;
+  let context: vscode.ExtensionContext;
 
   beforeEach(() => {
     secrets = {
@@ -120,7 +121,7 @@ describe('ApiKeyManager', () => {
       store: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
     };
-    context = { secrets };
+    context = { secrets } as unknown as vscode.ExtensionContext;
     (commands.executeCommand as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   });
 
@@ -174,7 +175,7 @@ describe('ApiKeyManager', () => {
 
 describe('UsageStatusBar', () => {
   it('shows, updates display, and hides', async () => {
-    const item = window.createStatusBarItem() as any;
+    const item = window.createStatusBarItem() as unknown as vscode.StatusBarItem;
     const dataSource = {
       refreshQuota: vi.fn().mockResolvedValue({
         used: 80,

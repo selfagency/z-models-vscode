@@ -137,14 +137,15 @@ describe('extension', () => {
     });
 
     it('logs warning when language model tool API is unavailable', () => {
-      const old = (lm as any).registerTool;
-      (lm as any).registerTool = undefined;
+      const lmWithRegister = lm as unknown as { registerTool?: unknown };
+      const old = lmWithRegister.registerTool;
+      lmWithRegister.registerTool = undefined;
 
       activate(mockContext);
 
       const log = (window.createOutputChannel as ReturnType<typeof vi.fn>).mock.results.at(-1)?.value;
       expect(log.warn).toHaveBeenCalled();
-      (lm as any).registerTool = old;
+      lmWithRegister.registerTool = old;
     });
 
     it('executes manageSettings command and shows coding endpoint info', async () => {

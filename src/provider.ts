@@ -73,9 +73,11 @@ export function createProgressStreamAdapter(progress: Progress<LanguageModelResp
     thinkingProgress(delta: { text?: string | string[]; id?: string; metadata?: Record<string, unknown> }): void {
       const thinking = Array.isArray(delta.text) ? delta.text.join('') : (delta.text ?? '');
       if (thinking.length > 0) {
-        const VSCodeThinkingPart = (vscode as any).LanguageModelThinkingPart;
+        const VSCodeThinkingPart = (vscode as unknown as {
+          LanguageModelThinkingPart?: new (value: string) => unknown;
+        }).LanguageModelThinkingPart;
         if (VSCodeThinkingPart) {
-          progress.report(new VSCodeThinkingPart(thinking));
+          progress.report(new VSCodeThinkingPart(thinking) as LanguageModelResponsePartWithThinking);
         } else {
           progress.report(new LanguageModelThinkingPart(thinking)); // local fallback
         }

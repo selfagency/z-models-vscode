@@ -1,11 +1,18 @@
-// biome-ignore lint/suspicious/noExplicitAny: Necessary for mocking the HTTP layer.
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UsageService } from '../usage-service.js';
+import { UsageService, type FetchResult } from '../usage-service.js';
 
 vi.mock('got', () => ({
   default: vi.fn(),
 }));
+
+type GotMock = { mockImplementation: (fn: (url: string) => { text: () => Promise<string> }) => void };
+
+type ServiceWithApiKey = { apiKey: string };
+
+function requireData(result: FetchResult) {
+  if (!result.data) throw new Error('expected data');
+  return result.data;
+}
 
 const quotaBody = {
   data: {
@@ -50,9 +57,9 @@ describe('UsageService', () => {
     const service = new UsageService('secret-key');
     expect(service).toBeInstanceOf(UsageService);
     expect(typeof service.fetchUsage).toBe('function');
-    expect((service as any).apiKey).toBe('secret-key');
+    expect((service as unknown as ServiceWithApiKey).apiKey).toBe('secret-key');
     service.updateApiKey('new-key');
-    expect((service as any).apiKey).toBe('new-key');
+    expect((service as unknown as ServiceWithApiKey).apiKey).toBe('new-key');
   });
 
   it('returns success:false when no apiKey is configured', async () => {
@@ -64,7 +71,7 @@ describe('UsageService', () => {
 
   it('returns a FetchResult with parsed UsageData on a successful fetch', async () => {
     const { default: got } = vi.mocked(await import('got'));
-    (got as any).mockImplementation((url: string) => {
+    (got as unknown as GotMock).mockImplementation((url: string) => {
       const body = String(url).includes('quota/limit') ? quotaBody : modelUsageBody;
       return { text: vi.fn().mockResolvedValue(JSON.stringify(body)) };
     });
@@ -73,8 +80,7 @@ describe('UsageService', () => {
     const result = await service.fetchUsage();
 
     expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
-    const data = result.data!;
+    const data = requireData(result);
     expect(data.planLevel).toBe('pro');
     expect(data.tokenQuotas).toHaveLength(1);
     expect(data.tokenQuotas[0]).toMatchObject({
@@ -107,7 +113,7 @@ describe('UsageService', () => {
 
   it('degrades gracefully to empty data when the HTTP layer throws', async () => {
     const { default: got } = vi.mocked(await import('got'));
-    (got as any).mockImplementation(() => {
+    (got as unknown as GotMock).mockImplementation(() => {
       throw new Error('network down');
     });
 
@@ -117,10 +123,10 @@ describe('UsageService', () => {
     // Promise.allSettled swallows per-endpoint failures, so the fetch still
     // resolves with empty usage data rather than rejecting.
     expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
-    expect(result.data!.tokenQuotas).toEqual([]);
-    expect(result.data!.timeLimits).toEqual([]);
-    expect(result.data!.todayPrompts).toBe(0);
-    expect(result.data!.todayTokens).toBe(0);
+    const data = requireData(result);
+    expect(data.tokenQuotas).toEqual([]);
+    expect(data.timeLimits).toEqual([]);
+    expect(data.todayPrompts).toBe(0);
+    expect(data.todayTokens).toBe(0);
   });
 });

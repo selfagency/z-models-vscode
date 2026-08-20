@@ -1,9 +1,21 @@
-// biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
-
-// biome-ignore lint/suspicious/noExplicitAny: Necessary for testing private methods.
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZChatModelProvider } from '../../provider.js';
+
+type ProviderWithParse = {
+  parseModelOptions: (raw: unknown, model: unknown) => {
+    temperature?: number;
+    topP?: number;
+    safePrompt?: boolean;
+    doSample?: boolean;
+    stop?: string[];
+    userId?: string;
+    thinking?: unknown;
+    responseFormat?: unknown;
+    webSearchTool?: { type: 'web_search'; web_search: Record<string, unknown> };
+    reasoningEffort?: string;
+  };
+  log: { warn: ReturnType<typeof vi.fn> };
+};
 
 const mockContext = {
   secrets: {
@@ -13,7 +25,7 @@ const mockContext = {
     onDidChange: vi.fn(),
   },
   subscriptions: [],
-} as any;
+} as unknown as import('vscode').ExtensionContext;
 
 describe('ZChatModelProvider — model options helper', () => {
   let provider: ZChatModelProvider;
@@ -34,9 +46,12 @@ describe('ZChatModelProvider — model options helper', () => {
     provider = new ZChatModelProvider(mockContext, undefined, false);
   });
 
+  const parse = (raw: unknown, model: unknown) =>
+    (provider as unknown as ProviderWithParse).parseModelOptions(raw, model);
+
   it('parses supported modelOptions into normalized request options', () => {
     const nonCompulsoryModel = { ...baseModel, id: 'glm-4.6' };
-    const parsed = (provider as any).parseModelOptions(
+    const parsed = parse(
       {
         temperature: 0.2,
         topP: 0.9,
@@ -61,21 +76,21 @@ describe('ZChatModelProvider — model options helper', () => {
     expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
     expect(parsed.responseFormat).toEqual({ type: 'json_object' });
     expect(parsed.webSearchTool).toBeDefined();
-    expect(parsed.webSearchTool.type).toBe('web_search');
+    expect(parsed.webSearchTool?.type).toBe('web_search');
   });
 
   it('uses correct Z.ai search_engine enum value when web search enabled', () => {
-    const parsed = (provider as any).parseModelOptions({ webSearch: true }, baseModel);
+    const parsed = parse({ webSearch: true }, baseModel);
 
     expect(parsed.webSearchTool).toBeDefined();
-    expect(parsed.webSearchTool.web_search).toBeDefined();
-    expect(parsed.webSearchTool.web_search.search_engine).toBe('search_pro_jina');
+    expect(parsed.webSearchTool?.web_search).toBeDefined();
+    expect(parsed.webSearchTool?.web_search.search_engine).toBe('search_pro_jina');
   });
 
   it('ignores explicit thinking disabled for compulsory-thinking models', () => {
-    const logWarnSpy = vi.spyOn((provider as any).log, 'warn');
+    const logWarnSpy = vi.spyOn((provider as unknown as ProviderWithParse).log, 'warn');
 
-    const parsed = (provider as any).parseModelOptions({ thinkingType: 'disabled' }, baseModel);
+    const parsed = parse({ thinkingType: 'disabled' }, baseModel);
 
     expect(parsed.thinking).toBeUndefined();
     expect(logWarnSpy).toHaveBeenCalledWith('[Z] Model glm-5.1 thinks compulsorily; ignoring thinking=disabled.');
@@ -83,21 +98,21 @@ describe('ZChatModelProvider — model options helper', () => {
 
   it('passes reasoning_effort into request body for glm-5.2 when thinking enabled', async () => {
     const glm52 = { ...baseModel, id: 'glm-5.2' };
-    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm52);
+    const parsed = parse({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm52);
     expect(parsed.thinking).toEqual({ type: 'enabled', clear_thinking: false });
     expect(parsed.reasoningEffort).toBe('low');
   });
 
   it('accepts reasoning_effort low for glm-5.3', () => {
     const glm53 = { ...baseModel, id: 'glm-5.3' };
-    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm53);
+    const parsed = parse({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm53);
     expect(parsed.reasoningEffort).toBe('low');
   });
 
   it('rejects xhigh for glm-5.3 and omits reasoning_effort', () => {
-    const logWarnSpy = vi.spyOn((provider as any).log, 'warn');
+    const logWarnSpy = vi.spyOn((provider as unknown as ProviderWithParse).log, 'warn');
     const glm53 = { ...baseModel, id: 'glm-5.3' };
-    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'xhigh' }, glm53);
+    const parsed = parse({ thinkingType: 'enabled', reasoning_effort: 'xhigh' }, glm53);
     expect(parsed.reasoningEffort).toBeUndefined();
     expect(logWarnSpy).toHaveBeenCalledWith(
       "[Z] Model glm-5.3 does not support reasoning_effort='xhigh'; ignoring.",
@@ -106,7 +121,7 @@ describe('ZChatModelProvider — model options helper', () => {
 
   it('omits reasoning_effort when thinking is disabled', () => {
     const nonCompulsory = { ...baseModel, id: 'glm-4.6' };
-    const parsed = (provider as any).parseModelOptions({ thinkingType: 'disabled', reasoning_effort: 'low' }, nonCompulsory);
+    const parsed = parse({ thinkingType: 'disabled', reasoning_effort: 'low' }, nonCompulsory);
     expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
     expect(parsed.reasoningEffort).toBeUndefined();
   });
