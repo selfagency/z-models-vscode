@@ -128,17 +128,25 @@ function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
 }
 
-function stripHtml(html: string): string {
+const ENTITY_MAP: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  '#39': "'",
+};
+
+export function stripHtml(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+    // single-pass decode so a decoded '&' is never re-scanned by later decodes
+    .replace(/&(amp|lt|gt|quot|#39|nbsp);/gi, (match, name: string) => {
+      const lower = name.toLowerCase();
+      return ENTITY_MAP[lower] ?? match;
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -148,8 +156,6 @@ function stripHtml(html: string): string {
  * Rejects non-http(s) schemes to avoid file/data/SSRF-style access.
  */
 export class ZWebFetchTool implements vscode.LanguageModelTool<{ url: string }> {
-  constructor(private readonly deps: WebToolDeps) {}
-
   prepareInvocation(
     options: vscode.LanguageModelToolInvocationPrepareOptions<{ url: string }>,
   ): { invocationMessage: string } | undefined {

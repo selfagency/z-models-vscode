@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import { LanguageModelTextPart, LanguageModelToolResult } from 'vscode';
-import { resolveApiKey, ZWebFetchTool, ZWebSearchTool } from './web-tools.js';
+import { resolveApiKey, stripHtml, ZWebFetchTool, ZWebSearchTool } from './web-tools.js';
 vi.mock('got', () => ({
   default: {
     post: vi.fn(),
@@ -8,13 +9,17 @@ vi.mock('got', () => ({
   },
 }));
 
+type GotMock = { post: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> };
+
+type ContextLike = { secrets: { get: ReturnType<typeof vi.fn> } };
+
 const mockContext = {
   secrets: {
     get: vi.fn().mockResolvedValue(undefined),
   },
-} as any;
+} as unknown as ContextLike;
 
-const mockToken = { isCancellationRequested: false } as any;
+const mockToken = { isCancellationRequested: false } as unknown as vscode.CancellationToken;
 
 function textOf(result: LanguageModelToolResult): string {
   return result.content
@@ -24,15 +29,17 @@ function textOf(result: LanguageModelToolResult): string {
 }
 
 describe('resolveApiKey', () => {
+  const ctx = mockContext as unknown as vscode.ExtensionContext;
+
   it('prefers the ApiKeyManager over secrets and env', async () => {
     const manager = { getApiKey: vi.fn().mockResolvedValue('manager-key') };
-    expect(await resolveApiKey(mockContext, manager)).toBe('manager-key');
+    expect(await resolveApiKey(ctx, manager)).toBe('manager-key');
   });
 
   it('falls back to secrets when the manager has no key', async () => {
     const manager = { getApiKey: vi.fn().mockResolvedValue(undefined) };
     mockContext.secrets.get.mockResolvedValue('secret-key');
-    expect(await resolveApiKey(mockContext, manager)).toBe('secret-key');
+    expect(await resolveApiKey(ctx, manager)).toBe('secret-key');
   });
 
   it('falls back to env vars when secrets are empty', async () => {
@@ -40,11 +47,37 @@ describe('resolveApiKey', () => {
     const old = process.env.Z_API_KEY;
     process.env.Z_API_KEY = 'env-key';
     try {
-      expect(await resolveApiKey(mockContext)).toBe('env-key');
+      expect(await resolveApiKey(ctx)).toBe('env-key');
     } finally {
       if (old === undefined) delete process.env.Z_API_KEY;
       else process.env.Z_API_KEY = old;
     }
+  });
+});
+
+describe('stripHtml', () => {
+  it('decodes entities in a single pass without double-decoding', () => {
+    expect(stripHtml('&amp;lt;')).toBe('&lt;');
+  });
+
+  it('decodes common entities to their characters', () => {
+    expect(stripHtml('a&nbsp;b')).toBe('a b');
+    expect(stripHtml('&lt;')).toBe('<');
+    expect(stripHtml('&#39;')).toBe("'");
+    expect(stripHtml('&quot;')).toBe('"');
+    expect(stripHtml('&gt;')).toBe('>');
+  });
+
+  it('removes script blocks even with whitespace before the closing tag', () => {
+    expect(stripHtml('<script>alert(1)</script >')).toBe('');
+  });
+
+  it('removes style blocks even with whitespace before the closing tag', () => {
+    expect(stripHtml('<style>.x{}</style >')).toBe('');
+  });
+
+  it('strips tags and collapses whitespace', () => {
+    expect(stripHtml('<p>Hello   <b>world</b></p>')).toBe('Hello world');
   });
 });
 
@@ -55,9 +88,9 @@ describe('ZWebSearchTool', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockContext.secrets.get.mockResolvedValue('test-key');
-    tool = new ZWebSearchTool({ context: mockContext });
+    tool = new ZWebSearchTool({ context: mockContext as unknown as vscode.ExtensionContext });
     const { default: got } = await import('got');
-    gotPost = got.post as any;
+    gotPost = (got as unknown as GotMock).post;
   });
 
   it('returns a LanguageModelToolResult containing the search text', async () => {
@@ -126,9 +159,9 @@ describe('ZWebFetchTool', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    tool = new ZWebFetchTool({ context: mockContext });
+    tool = new ZWebFetchTool();
     const { default: got } = await import('got');
-    gotGet = got.get as any;
+    gotGet = (got as unknown as GotMock).get;
   });
 
   it('returns stripped text from a mocked fetch', async () => {

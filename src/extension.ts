@@ -189,7 +189,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(vscode.lm.registerTool('z_webSearch', new ZWebSearchTool({ context, apiKeyManager })));
       }
       if (toolsConfig.webFetch !== false) {
-        context.subscriptions.push(vscode.lm.registerTool('z_webFetch', new ZWebFetchTool({ context, apiKeyManager })));
+        context.subscriptions.push(vscode.lm.registerTool('z_webFetch', new ZWebFetchTool()));
       }
     } else {
       logOutputChannel?.warn('[Z] Language model tool API is unavailable in this VS Code build.');
