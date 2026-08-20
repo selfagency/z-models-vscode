@@ -129,6 +129,7 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
   'glm-5.2': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.2
+  'glm-5.3': { maxInputTokens: 200_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3
 
   // GLM-4.7 series (Preserved Thinking enabled by default)
   'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
@@ -154,13 +155,13 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'autoglm-phone-multilingual': { maxInputTokens: 64_000, maxOutputTokens: 4_000 },
 };
 
-function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
+export function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
   const normalized = id.toLowerCase();
   return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
 }
 
-function modelThinksCompulsorily(modelId: string): boolean {
-  return /^glm-(?:5\.1|5(?:-turbo|v-turbo)?|4\.7)/i.test(modelId);
+export function modelThinksCompulsorily(modelId: string): boolean {
+  return /^glm-(?:5\.3|5\.2|5\.1|5(?:-turbo|v-turbo)?|4\.7)/i.test(modelId);
 }
 
 /**
@@ -1206,9 +1207,9 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         .json<ModelLimitResponse>();
 
       return {
-        maxInputTokens: response.context_window ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxInputTokens,
+        maxInputTokens: response.context_window ?? getKnownTokenLimits(modelId).maxInputTokens,
         maxOutputTokens:
-          response.max_completion_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          response.max_completion_tokens ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       };
     } catch {
       // Fall back to known limits if API fetch fails
