@@ -139,8 +139,8 @@ const ENTITY_MAP: Record<string, string> = {
 
 export function stripHtml(html: string): string {
   return html
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     // single-pass decode so a decoded '&' is never re-scanned by later decodes
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/gi, (match, name: string) => {

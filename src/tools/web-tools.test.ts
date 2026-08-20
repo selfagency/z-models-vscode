@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import { LanguageModelTextPart, LanguageModelToolResult } from 'vscode';
 import { resolveApiKey, stripHtml, ZWebFetchTool, ZWebSearchTool } from './web-tools.js';
 vi.mock('got', () => ({
@@ -74,6 +74,16 @@ describe('stripHtml', () => {
 
   it('removes style blocks even with whitespace before the closing tag', () => {
     expect(stripHtml('<style>.x{}</style >')).toBe('');
+  });
+
+  it('removes script blocks with attributes on the closing tag', () => {
+    expect(stripHtml('<script>alert(1)</script data-x="1">')).toBe('');
+    expect(stripHtml('<script>alert(1)</script foo bar>')).toBe('');
+  });
+
+  it('removes style blocks with attributes on the closing tag', () => {
+    expect(stripHtml('<style>.x{}</style foo>')).toBe('');
+    expect(stripHtml('<style>.x{}</style x>')).toBe('');
   });
 
   it('strips tags and collapses whitespace', () => {
