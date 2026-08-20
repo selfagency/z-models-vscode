@@ -1053,21 +1053,24 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       : undefined;
 
     // Reasoning effort (GLM-5.2+); only takes effect when thinking is enabled.
-    const rawReasoningEffort =
-      typeof modelOptions.reasoningEffort === 'string'
-        ? modelOptions.reasoningEffort
-        : typeof modelOptions.reasoning_effort === 'string'
-          ? modelOptions.reasoning_effort
-          : undefined;
+    let rawReasoningEffort: string | undefined;
+    if (typeof modelOptions.reasoningEffort === 'string') {
+      rawReasoningEffort = modelOptions.reasoningEffort;
+    } else if (typeof modelOptions.reasoning_effort === 'string') {
+      rawReasoningEffort = modelOptions.reasoning_effort;
+    }
     let reasoningEffort: string | undefined;
     if (rawReasoningEffort && thinking?.type === 'enabled') {
       const isGlm53 = /^glm-5\.3(?:[-_]|$)/i.test(foundModel.id);
       const isGlm52Plus = /^glm-5\.[2-9]/i.test(foundModel.id);
-      const allowed = isGlm53
-        ? ['max', 'high', 'low']
-        : isGlm52Plus
-          ? ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none']
-          : [];
+      let allowed: string[];
+      if (isGlm53) {
+        allowed = ['max', 'high', 'low'];
+      } else if (isGlm52Plus) {
+        allowed = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'];
+      } else {
+        allowed = [];
+      }
       if (allowed.includes(rawReasoningEffort)) {
         reasoningEffort = rawReasoningEffort;
       } else {
