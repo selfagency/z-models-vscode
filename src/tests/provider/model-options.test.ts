@@ -80,4 +80,34 @@ describe('ZChatModelProvider — model options helper', () => {
     expect(parsed.thinking).toBeUndefined();
     expect(logWarnSpy).toHaveBeenCalledWith('[Z] Model glm-5.1 thinks compulsorily; ignoring thinking=disabled.');
   });
+
+  it('passes reasoning_effort into request body for glm-5.2 when thinking enabled', async () => {
+    const glm52 = { ...baseModel, id: 'glm-5.2' };
+    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm52);
+    expect(parsed.thinking).toEqual({ type: 'enabled', clear_thinking: false });
+    expect(parsed.reasoningEffort).toBe('low');
+  });
+
+  it('accepts reasoning_effort low for glm-5.3', () => {
+    const glm53 = { ...baseModel, id: 'glm-5.3' };
+    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'low' }, glm53);
+    expect(parsed.reasoningEffort).toBe('low');
+  });
+
+  it('rejects xhigh for glm-5.3 and omits reasoning_effort', () => {
+    const logWarnSpy = vi.spyOn((provider as any).log, 'warn');
+    const glm53 = { ...baseModel, id: 'glm-5.3' };
+    const parsed = (provider as any).parseModelOptions({ thinkingType: 'enabled', reasoning_effort: 'xhigh' }, glm53);
+    expect(parsed.reasoningEffort).toBeUndefined();
+    expect(logWarnSpy).toHaveBeenCalledWith(
+      "[Z] Model glm-5.3 does not support reasoning_effort='xhigh'; ignoring.",
+    );
+  });
+
+  it('omits reasoning_effort when thinking is disabled', () => {
+    const nonCompulsory = { ...baseModel, id: 'glm-4.6' };
+    const parsed = (provider as any).parseModelOptions({ thinkingType: 'disabled', reasoning_effort: 'low' }, nonCompulsory);
+    expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
+    expect(parsed.reasoningEffort).toBeUndefined();
+  });
 });

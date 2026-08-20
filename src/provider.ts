@@ -414,6 +414,10 @@ export interface ZSupportedModelOptions {
   // Web search tool helper
   webSearch?: boolean | Record<string, unknown>;
   web_search?: boolean | Record<string, unknown>;
+
+  // Reasoning effort (GLM-5.2+)
+  reasoningEffort?: string;
+  reasoning_effort?: string;
 }
 
 interface ZParsedRequestOptions {
@@ -426,6 +430,7 @@ interface ZParsedRequestOptions {
   thinking?: { type: 'enabled' | 'disabled'; clear_thinking?: boolean };
   responseFormat?: { type: 'json_object' };
   webSearchTool?: { type: 'web_search'; web_search: Record<string, unknown> };
+  reasoningEffort?: string;
 }
 
 /**
@@ -696,6 +701,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         temperature?: number;
         topP?: number;
         safePrompt?: boolean;
+        reasoningEffort?: string;
         abortSignal?: AbortSignal;
       }) => AsyncIterable<{
         data: {
@@ -804,6 +810,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
           temperature,
           topP,
           safePrompt,
+          reasoningEffort,
           abortSignal,
         }) {
           const gotStream = got.stream.post(`${baseUrl}/chat/completions`, {
@@ -826,6 +833,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
               tool_stream: toolStream,
               thinking,
               response_format: responseFormat,
+              ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
               stream: true,
             },
           });
@@ -1034,6 +1042,31 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         }
       : undefined;
 
+    // Reasoning effort (GLM-5.2+); only takes effect when thinking is enabled.
+    const rawReasoningEffort =
+      typeof modelOptions.reasoningEffort === 'string'
+        ? modelOptions.reasoningEffort
+        : typeof modelOptions.reasoning_effort === 'string'
+          ? modelOptions.reasoning_effort
+          : undefined;
+    let reasoningEffort: string | undefined;
+    if (rawReasoningEffort && thinking?.type === 'enabled') {
+      const isGlm53 = /^glm-5\.3(?:[-_]|$)/i.test(foundModel.id);
+      const isGlm52Plus = /^glm-5\.[2-9]/i.test(foundModel.id);
+      const allowed = isGlm53
+        ? ['max', 'high', 'low']
+        : isGlm52Plus
+          ? ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none']
+          : [];
+      if (allowed.includes(rawReasoningEffort)) {
+        reasoningEffort = rawReasoningEffort;
+      } else {
+        this.log.warn(
+          `[Z] Model ${foundModel.id} does not support reasoning_effort='${rawReasoningEffort}'; ignoring.`,
+        );
+      }
+    }
+
     return {
       temperature,
       topP,
@@ -1044,6 +1077,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       thinking,
       responseFormat,
       webSearchTool,
+      reasoningEffort,
     };
   }
 
@@ -1560,7 +1594,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     // Allow VS Code modelOptions to override some request parameters.
     const parsedOptions = this.parseModelOptions(options.modelOptions, foundModel);
-    const { temperature, topP, safePrompt, doSample, stop, userId, thinking, responseFormat, webSearchTool } =
+    const { temperature, topP, safePrompt, doSample, stop, userId, thinking, responseFormat, webSearchTool, reasoningEffort } =
       parsedOptions;
     const requestId = randomUUID();
     this.log.info(`[Z] request_id=${requestId}`);
@@ -1589,6 +1623,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         toolStream: requestTools.length > 0 ? true : undefined,
         thinking,
         responseFormat,
+        reasoningEffort,
         abortSignal,
       });
 
