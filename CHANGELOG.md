@@ -2,21 +2,6 @@
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-08-20
-
-## What's Changed
-* feat: migrate extension to @agentsy/core and @agentsy/vscode by @selfagency in https://github.com/selfagency/z-models-vscode/pull/9
-* fix: add token limit fallback for glm-5.2 by @callumgare in https://github.com/selfagency/z-models-vscode/pull/11
-* fix: full remediation + migrate off unpublished @agentsy packages by @selfagency in https://github.com/selfagency/z-models-vscode/pull/13
-
-## New Contributors
-* @callumgare made their first contribution in https://github.com/selfagency/z-models-vscode/pull/11
-
-**Full Changelog**: https://github.com/selfagency/z-models-vscode/compare/v0.1.7...v0.2.0
-
-_Source: changes from v0.1.7 to v0.2.0._
-
-
 ### Production-Ready Release 🎉
 
 This major version release brings critical stability fixes, architectural improvements, and enhanced reliability for production use.
