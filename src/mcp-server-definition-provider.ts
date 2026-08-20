@@ -3,7 +3,7 @@ import {
   McpServerRegistry,
   type ApiKeyManager,
   type McpServerProvider,
-} from '@agentsy/vscode';
+} from './agentsy-native.js';
 import * as vscode from 'vscode';
 
 const MCP_URLS = {

@@ -1,6 +1,6 @@
-import { createGenericAdapter } from '@agentsy/adapters';
-import { normalizeZAiChunk } from '@agentsy/normalizers';
-import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/tool-calls';
+import { createGenericAdapter } from '@agentsy/providers/adapters';
+import { normalizeZAiChunk } from '@agentsy/providers/normalizers';
+import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/core/tool-calls';
 import {
   calculateRetryDelay,
   cancellationTokenToAbortSignal,
@@ -11,7 +11,7 @@ import {
   isRetryableError,
   withRetry,
   type ApiKeyManager,
-} from '@agentsy/vscode';
+} from './agentsy-native.js';
 import got from 'got';
 import { randomUUID } from 'node:crypto';
 import { get_encoding, Tiktoken } from 'tiktoken';
