@@ -10,7 +10,7 @@ export default defineConfig({
   format: ['cjs'],
   platform: 'node',
   external: ['vscode'],
-  noExternal: ['tiktoken', '@agentsy/normalizers', '@agentsy/processor', 'got'],
+  noExternal: ['tiktoken', 'got', '@agentsy/core', '@agentsy/providers'],
   // Bundle the streaming helpers so the extension runtime does not depend on the old monolith surface.
   bundle: true,
   sourcemap: !production,
