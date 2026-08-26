@@ -170,6 +170,27 @@ jobs:
       - name: Skip repo mutation in release workflow
         run: echo "Version/changelog updates are performed locally before tagging."
 
+      # The workflow_dispatch path creates the tag from the `version` input but
+      # does not bump package.json (that is done locally by scripts/release.mjs
+      # before a tag push). Without this override, `vsce publish` reads the stale
+      # version from package.json and fails with "<version> already exists" when
+      # the tag and package.json diverge. Rewrite package.json to the dispatched
+      # version so the packaged extension matches the tag.
+      - name: Align package.json version with dispatched tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ needs.detect-tag.outputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          node -e "
+            const fs = require('node:fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "package.json version set to ${VERSION}"
+        env:
+          VERSION: "${{ needs.detect-tag.outputs.release_tag }}"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
