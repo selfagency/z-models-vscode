@@ -37,7 +37,15 @@ describe('context-window correctness (issue #12)', () => {
   });
 
   it('getKnownTokenLimits returns hardcoded limits for glm-5.3', () => {
-    expect(getKnownTokenLimits('glm-5.3')).toEqual({ maxInputTokens: 200000, maxOutputTokens: 128000 });
+    expect(getKnownTokenLimits('glm-5.3')).toEqual({ maxInputTokens: 1000000, maxOutputTokens: 128000 });
+  });
+
+  it('getKnownTokenLimits returns hardcoded limits for glm-5.3-flash', () => {
+    expect(getKnownTokenLimits('glm-5.3-flash')).toEqual({ maxInputTokens: 1000000, maxOutputTokens: 128000 });
+  });
+
+  it('modelThinksCompulsorily is true for glm-5.3-flash', () => {
+    expect(modelThinksCompulsorily('glm-5.3-flash')).toBe(true);
   });
 
   it('modelThinksCompulsorily is true for glm-5.3 and glm-5.2', () => {
@@ -49,7 +57,7 @@ describe('context-window correctness (issue #12)', () => {
     const { default: got } = await import('got');
     (got as unknown as GotGetMock).get.mockReturnValue({ json: vi.fn().mockResolvedValue({ max_tokens: 65536 }) });
     const limits = await (provider as unknown as ProviderWithPrivates).fetchModelTokenLimits('glm-5.3');
-    expect(limits.maxInputTokens).toBe(200000); // hardcoded fallback, NOT 65536
+    expect(limits.maxInputTokens).toBe(1000000); // hardcoded fallback, NOT 65536
     expect(limits.maxOutputTokens).toBe(65536);
   });
 
