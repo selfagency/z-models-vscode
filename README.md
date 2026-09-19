@@ -97,13 +97,18 @@ This provider supports the following `modelOptions` keys (used internally by VS 
 - `doSample: boolean` (alias: `do_sample`)
 - `stop: string[]` (only the first stop string is sent)
 - `userId: string` (alias: `user_id`; must be 6–128 characters)
-- `reasoningEffort: string` (alias: `reasoning_effort`; GLM-5.2+ only; values `max`|`xhigh`|`high`|`medium`|`low`|`minimal`|`none`; only applied when thinking is enabled)
+- `reasoningEffort: string` (alias: `reasoning_effort`; GLM-5.2+ only; only applied when thinking is enabled)
+  - GLM-5.2.x: `max`|`xhigh`|`high`|`medium`|`low`|`minimal`|`none`
+  - GLM-5.3 and GLM-5.3-Flash/FlashX: `max`|`high`|`low` (the API defaults to `max`)
 
 Thinking controls:
 
 - `thinking: boolean` (`false` maps to `thinking.type = "disabled"`)
 - `thinkingType: "enabled" | "disabled"`
 - `clearThinking: boolean` (alias: `clear_thinking`)
+
+Compulsory-thinking models (GLM-5, GLM-5.1, GLM-5.2, GLM-5.3, GLM-5.3-Flash/FlashX, GLM-4.7) cannot disable
+reasoning: a `disabled` request is ignored and logged. Use `reasoningEffort` to tune their thinking instead.
 
 Structured output:
 

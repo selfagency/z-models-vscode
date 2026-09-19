@@ -131,6 +131,11 @@ export function getConfiguredBaseUrl(): string {
 const DEFAULT_COMPLETION_TOKENS = 65536;
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 
+// Last-resort input window when neither the API nor the known-limits table
+// provides one. Kept intentionally small; issue #21 was caused by models
+// falling back here, so every supported model should have a known limit.
+const DEFAULT_MAX_INPUT_TOKENS = 32768;
+
 // Maximum characters per tool result to prevent context window overflow
 const MAX_TOOL_RESULT_CHARS = 20000;
 
@@ -153,6 +158,7 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutp
   'glm-5.2': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.2
   'glm-5.3': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3
   'glm-5.3-flash': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3-flash
+  'glm-5.3-flashx': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3-flash
 
   // GLM-4.7 series (Preserved Thinking enabled by default)
   'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
@@ -184,7 +190,39 @@ export function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxO
 }
 
 export function modelThinksCompulsorily(modelId: string): boolean {
-  return /^glm-(?:5\.3|5\.2|5\.1|5(?:-turbo|v-turbo)?|4\.7)/i.test(modelId);
+  // The trailing guard stops future patch releases (e.g. `glm-5.10`) from
+  // matching the `5.1` alternative by prefix accident. A trailing `v`
+  // (e.g. `glm-4.7v`) is still treated as part of the version.
+  return /^glm-(?:5\.3|5\.2|5\.1|5(?:-turbo|v-turbo)?|4\.7)v?(?![.\d])/i.test(modelId);
+}
+
+/**
+ * Resolve the effective input token limit from an API-reported value and the
+ * documentation-backed value.
+ *
+ * The API can omit `context_window` (issue #21) or report a stale, smaller
+ * value. When both sources are present the larger one wins and the discrepancy
+ * is logged, so a genuinely smaller server-side limit stays discoverable.
+ */
+function resolveInputTokenLimit(
+  apiValue: unknown,
+  knownValue: number | undefined,
+  modelId: string,
+  log?: { warn(message: string): void },
+): number | undefined {
+  const isUsable = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+  if (!isUsable(apiValue)) {
+    return knownValue;
+  }
+  if (typeof knownValue === 'number' && knownValue > apiValue) {
+    log?.warn(
+      `[Z] Model ${modelId} reports an input window of ${apiValue} tokens, below the documented ${knownValue}; using the documented value.`,
+    );
+    return knownValue;
+  }
+  return apiValue;
 }
 
 /**
@@ -1233,15 +1271,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     modelId: string,
     abortSignal?: AbortSignal,
   ): Promise<{ maxInputTokens?: number; maxOutputTokens?: number }> {
+    const known = getKnownTokenLimits(modelId);
     try {
       if (!this.client) {
-        return getKnownTokenLimits(modelId);
+        return known;
       }
 
       const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
       const apiKey = await this.getApiKeyFromSecretsOrEnv();
       if (!apiKey) {
-        return getKnownTokenLimits(modelId);
+        return known;
       }
 
       interface ModelLimitResponse {
@@ -1261,13 +1300,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         .json<ModelLimitResponse>();
 
       return {
-        maxInputTokens: response.context_window ?? getKnownTokenLimits(modelId).maxInputTokens,
+        maxInputTokens: resolveInputTokenLimit(response.context_window, known.maxInputTokens, modelId, this.log),
         maxOutputTokens:
-          response.max_completion_tokens ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          response.max_completion_tokens ?? response.max_tokens ?? known.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       };
     } catch {
       // Fall back to known limits if API fetch fails
-      return getKnownTokenLimits(modelId);
+      return known;
     }
   }
 
@@ -1330,7 +1369,11 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             id: m.id,
             originalName: m.name ?? formatModelName(m.id),
             detail: m.detail ?? undefined,
-            maxInputTokens: m.maxInputTokens ?? tokenLimits.maxInputTokens ?? 32768,
+            // Never let a missing or under-reported API value shrink a model
+            // below its documented window (issue #21).
+            maxInputTokens:
+              resolveInputTokenLimit(m.maxInputTokens, tokenLimits.maxInputTokens, m.id, this.log) ??
+              DEFAULT_MAX_INPUT_TOKENS,
             maxOutputTokens: m.maxOutputTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
             defaultCompletionTokens:
               m.defaultCompletionTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,

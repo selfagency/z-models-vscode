@@ -22,7 +22,10 @@ export function inferToolCallingFromModelId(id: string): boolean {
 }
 
 export function inferVisionFromModelId(id: string): boolean {
-  return /(?:\d+(?:\.\d+)?v(?:-|$)|5v(?:-|$)|vision|vl|-ocr)/i.test(id);
+  // `glm-5.3-flash`/`glm-5.3-flashx` are the multimodal members of the GLM-5.3
+  // family (image/video/file input), unlike text-only `glm-5.3`.
+  // See https://docs.z.ai/guides/llm/glm-5.3-flash
+  return /(?:\d+(?:\.\d+)?v(?:-|$)|5v(?:-|$)|5\.3-flashx?(?:-|$)|vision|vl|-ocr)/i.test(id);
 }
 
 export function resolveModelCapabilities(model: any): {
