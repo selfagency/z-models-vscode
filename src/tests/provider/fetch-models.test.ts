@@ -51,6 +51,40 @@ describe('ZChatModelProvider — fetchModels', () => {
     const [model] = await provider.fetchModels();
     expect(model.toolCalling).toBe(true);
   });
+
+  it('reports the documented 1M window for glm-5.3-flash instead of the 32K default', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-5.3-flash', object: 'model', created: 1, owned_by: 'z-ai' }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.maxInputTokens).toBe(1_000_000);
+    expect(model.maxInputTokens).not.toBe(32768);
+    expect(model.maxOutputTokens).toBe(128_000);
+    expect(model.supportsVision).toBe(true);
+  });
+
+  it('reports the documented 1M window for glm-5.3-flashx', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-5.3-flashx', object: 'model', created: 1, owned_by: 'z-ai' }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.maxInputTokens).toBe(1_000_000);
+    expect(model.maxInputTokens).not.toBe(32768);
+  });
+
+  it('does not let an under-reported model-list window shrink glm-5.3-flash', async () => {
+    const mockList = vi.fn().mockResolvedValue({
+      data: [{ id: 'glm-5.3-flash', object: 'model', created: 1, owned_by: 'z-ai', maxInputTokens: 32768 }],
+    });
+    (provider as any).client = { models: { list: mockList } };
+
+    const [model] = await provider.fetchModels();
+    expect(model.maxInputTokens).toBe(1_000_000);
+  });
 });
 
 describe('ZChatModelProvider — Fetch Models Edge Cases', () => {

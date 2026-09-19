@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LanguageModelChatMessageRole,
 } from 'vscode';
+import { inferVisionFromModelId } from '../../model-info.js';
 import { toZRole, formatModelName } from '../../provider.js';
 
 describe('toZRole', () => {
@@ -33,5 +34,21 @@ describe('formatModelName', () => {
 
   it('handles numeric segments without error', () => {
     expect(formatModelName('devstral-small-2505')).toBe('Devstral Small 2505');
+  });
+});
+
+describe('inferVisionFromModelId', () => {
+  it('treats the multimodal glm-5.3 flash variants as vision-capable', () => {
+    expect(inferVisionFromModelId('glm-5.3-flash')).toBe(true);
+    expect(inferVisionFromModelId('glm-5.3-flashx')).toBe(true);
+  });
+
+  it('keeps text-only glm-5.3 as non-vision', () => {
+    expect(inferVisionFromModelId('glm-5.3')).toBe(false);
+  });
+
+  it('still detects the existing vision markers', () => {
+    expect(inferVisionFromModelId('glm-5v-turbo')).toBe(true);
+    expect(inferVisionFromModelId('glm-4.6v-flash')).toBe(true);
   });
 });

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 🐛 Fixes
+
+- **GLM-5.3 / GLM-5.3-Flash / GLM-5.3-FlashX context windows** - these models now report their documented 1M-token
+  input window instead of falling back to the 32K default, which caused Copilot Chat to compact constantly (#21).
+  An API-reported `context_window`/`maxInputTokens` that is *below* the documented value no longer shrinks the window.
+- **GLM-5.3-FlashX support** - added known token limits for the FlashX variant.
+- **Vision detection** - `glm-5.3-flash`/`glm-5.3-flashx` are now correctly reported as image-input capable.
+- **`modelThinksCompulsorily`** - future patch releases such as `glm-5.10` no longer match by prefix accident.
+
 ## [0.2.0] - 2026-08-20
 
 ## What's Changed

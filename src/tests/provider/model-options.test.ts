@@ -125,4 +125,21 @@ describe('ZChatModelProvider — model options helper', () => {
     expect(parsed.thinking).toEqual({ type: 'disabled', clear_thinking: false });
     expect(parsed.reasoningEffort).toBeUndefined();
   });
+
+  it('accepts reasoning_effort max for glm-5.3-flash when thinking is enabled', () => {
+    const glm53Flash = { ...baseModel, id: 'glm-5.3-flash' };
+    const parsed = parse({ thinkingType: 'enabled', reasoning_effort: 'max' }, glm53Flash);
+    expect(parsed.thinking).toEqual({ type: 'enabled', clear_thinking: false });
+    expect(parsed.reasoningEffort).toBe('max');
+  });
+
+  it('ignores thinking=disabled for glm-5.3-flashx', () => {
+    const logWarnSpy = vi.spyOn((provider as unknown as ProviderWithParse).log, 'warn');
+    const glm53Flashx = { ...baseModel, id: 'glm-5.3-flashx' };
+    const parsed = parse({ thinkingType: 'disabled' }, glm53Flashx);
+    expect(parsed.thinking).toBeUndefined();
+    expect(logWarnSpy).toHaveBeenCalledWith(
+      '[Z] Model glm-5.3-flashx thinks compulsorily; ignoring thinking=disabled.',
+    );
+  });
 });
