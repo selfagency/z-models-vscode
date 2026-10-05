@@ -244,3 +244,4 @@ package-lock.json
 .fallow/
 .opencode/opencode-loop
 .opencode/magic-context
+.cortexkit

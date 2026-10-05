@@ -1,3 +1,34 @@
+/**
+ * VENDORED — do not read this as bespoke extension code.
+ *
+ * Everything in this file is a copy of the `@agentsy/vscode` integration
+ * surface, which is **not published to npm** (verified 2026-10-05: `vscode`,
+ * `processor`, `normalizers`, `structured`, `agent` and `ag-ui` subpaths are all
+ * absent from the registry). It is vendored here because the extension needs it,
+ * not because it was written locally.
+ *
+ * Contents, all from upstream:
+ *   - ProviderErrorCode and the status/code/message mapping
+ *   - withRetry + retry delay calculation
+ *   - cancellationTokenToAbortSignal
+ *   - createVSCodeAgentLoop / createVSCodeChatRenderer (uses @agentsy/core's
+ *     LLMStreamProcessor internally)
+ *   - ApiKeyManager
+ *   - createMcpServerDefinitionProvider + McpServerRegistry
+ *
+ * Locally diverged code has been moved OUT of this file:
+ *   - UsageStatusBar -> src/usage-status-bar.ts (upstream leak fixed)
+ *   - the Z.ai MCP server table -> src/mcp-server-definition-provider.ts
+ *
+ * Two options when upstream ships:
+ *   1. Delete this file and depend on `@agentsy/vscode`, keeping only the
+ *      divergences above as thin local wrappers.
+ *   2. If the published package differs, re-diff before deleting - the copy has
+ *      not been kept in sync with upstream since vendoring.
+ *
+ * The LICENSE note matters: the extension is GPL-3.0-or-later because
+ * `@agentsy/core` and `@agentsy/types` are GPL-3.0-or-later.
+ */
 import { LLMStreamProcessor, type ProcessorOptions, type ProcessedOutput, type OutputPart } from '@agentsy/core';
 import type { FinishReason, StreamChunk, UsageInfo } from '@agentsy/types';
 import * as vscode from 'vscode';
@@ -578,168 +609,6 @@ export class ApiKeyManager {
   dispose(): void {
     this.listeners.clear();
     this.apiKey = undefined;
-  }
-}
-
-// ── Usage quota + status bar ──────────────────────────────────────────────
-export interface UsageQuota {
-  used: number;
-  total: number;
-  unit: 'tokens' | 'credits' | 'requests';
-  window: 'hourly' | 'daily' | 'weekly' | 'monthly';
-  /**
-   * Human-readable window as reported by the API, e.g. "5-Hour" or "1-Week".
-   * Preferred over `window` for display because the API's windows do not map
-   * cleanly onto hour/day granularity (a unit-3 window is a 5-hour window).
-   */
-  windowLabel?: string;
-  /** Plan level reported by the API, e.g. "lite" / "pro" / "max". */
-  planLevel?: string;
-  percentUsed: number;
-  expiresAt?: Date;
-}
-
-export interface IQuotaDataSource {
-  getQuota(): Promise<UsageQuota>;
-  refreshQuota(): Promise<UsageQuota>;
-  dispose?(): void;
-}
-
-export interface UsageStatusBarConfig {
-  displayName: string;
-  tooltipTemplate?: string;
-  warningThreshold?: number;
-  errorThreshold?: number;
-  refreshIntervalMs?: number;
-  /**
-   * VS Code command invoked when the status bar item is clicked. Required for the
-   * item to be interactive — without it the click is silently ignored.
-   */
-  clickCommand?: string;
-  quotaDataSource: IQuotaDataSource;
-  colorScheme?: { normal: string; warning: string; error: string };
-}
-
-const DEFAULT_REFRESH_INTERVAL = 60_000;
-const DEFAULT_TOOLTIP = '{{window}} window: {{used}} / {{total}} {{unit}} used ({{percent}}%)';
-const DEFAULT_WARNING_THRESHOLD = 0.8;
-const DEFAULT_ERROR_THRESHOLD = 0.95;
-
-/** Displays quota usage in the VS Code status bar with configurable thresholds. */
-export class UsageStatusBar {
-  private statusBarItem: vscode.StatusBarItem | undefined;
-  private refreshTimer: ReturnType<typeof setInterval> | undefined;
-
-  constructor(private readonly config: UsageStatusBarConfig) {}
-
-  /**
-   * Show the status bar item. Idempotent: repeated calls reuse the existing item
-   * and timer instead of stacking a new item + interval on every invocation.
-   * (Stacking was the reported "usage bar multiplies" bug.)
-   */
-  async show(): Promise<UsageQuota | undefined> {
-    try {
-      if (!this.statusBarItem) {
-        const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        if (!item) return undefined;
-        this.statusBarItem = item;
-        if (this.config.clickCommand) {
-          item.command = this.config.clickCommand;
-        }
-      }
-
-      const quota = await this.refresh();
-      this.statusBarItem.show();
-      this.startAutoRefresh();
-      return quota;
-    } catch {
-      // No-op if VS Code is unavailable.
-      return undefined;
-    }
-  }
-
-  async refresh(): Promise<UsageQuota | undefined> {
-    try {
-      const quota = await this.config.quotaDataSource.refreshQuota();
-      this.updateDisplay(quota);
-      return quota;
-    } catch {
-      return undefined;
-    }
-  }
-
-  updateDisplay(quota: UsageQuota): void {
-    if (!this.statusBarItem) return;
-    const item = this.statusBarItem;
-    const percent = Math.round(quota.percentUsed * 100);
-    const window = quota.windowLabel ?? quota.window;
-    item.text = `$(pulse) ${this.config.displayName}: ${percent}% of ${window}`;
-    const template = this.config.tooltipTemplate ?? DEFAULT_TOOLTIP;
-    const plan = quota.planLevel ? `Z.ai ${quota.planLevel.toUpperCase()} plan\n` : '';
-    const reset = quota.expiresAt
-      ? `\nResets ${quota.expiresAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-      : '';
-    item.tooltip =
-      plan +
-      template
-        .replace('{{used}}', quota.used.toLocaleString())
-        .replace('{{total}}', quota.total.toLocaleString())
-        .replace('{{unit}}', quota.unit)
-        .replace('{{percent}}', String(percent))
-        .replace('{{window}}', window) +
-      reset;
-    item.color = this.pickColor(quota.percentUsed);
-  }
-
-  private pickColor(percentUsed: number): string | undefined {
-    const colorScheme = this.config.colorScheme;
-    if (!colorScheme) return undefined;
-    const warning = this.config.warningThreshold ?? DEFAULT_WARNING_THRESHOLD;
-    const error = this.config.errorThreshold ?? DEFAULT_ERROR_THRESHOLD;
-    if (percentUsed >= error) return colorScheme.error;
-    if (percentUsed >= warning) return colorScheme.warning;
-    return colorScheme.normal;
-  }
-
-  /** Hide the item and stop polling. Safe to call repeatedly. */
-  hide(): void {
-    this.stopAutoRefresh();
-    this.statusBarItem?.hide();
-  }
-
-  /**
-   * Change the auto-refresh cadence. Takes effect immediately if polling is
-   * currently running; if the bar is hidden, the new interval applies on the
-   * next show().
-   */
-  setRefreshInterval(ms: number): void {
-    if (this.config.refreshIntervalMs === ms) return;
-    this.config.refreshIntervalMs = ms;
-    if (this.refreshTimer === undefined) return;
-    this.stopAutoRefresh();
-    this.startAutoRefresh();
-  }
-
-  dispose(): void {
-    this.stopAutoRefresh();
-    this.statusBarItem?.dispose();
-    this.statusBarItem = undefined;
-    this.config.quotaDataSource.dispose?.();
-  }
-
-  private startAutoRefresh(): void {
-    if (this.refreshTimer !== undefined) return;
-    const interval = this.config.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL;
-    this.refreshTimer = setInterval(() => {
-      void this.refresh();
-    }, interval);
-  }
-
-  private stopAutoRefresh(): void {
-    if (this.refreshTimer !== undefined) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
   }
 }
 

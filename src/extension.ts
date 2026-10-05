@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar } from './agentsy-native.js';
+import { ApiKeyManager } from './agentsy-native.js';
+import { type IQuotaDataSource, type UsageQuota, UsageStatusBar } from './usage-status-bar.js';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
 import { ZWebFetchTool, ZWebSearchTool } from './tools/web-tools.js';

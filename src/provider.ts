@@ -1,5 +1,6 @@
 import { createGenericAdapter } from '@agentsy/providers/adapters';
 import { normalizeZAiChunk } from '@agentsy/providers/normalizers';
+import { createZAiInlineToolCallParser } from '@agentsy/core/processor';
 import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/core/tool-calls';
 import { MODEL_TOKEN_LIMITS } from './model-limits.generated.js';
 import {
@@ -187,147 +188,6 @@ export function modelThinksCompulsorily(modelId: string): boolean {
  */
 type LanguageModelResponsePartWithThinking = LanguageModelResponsePart | LanguageModelThinkingPart;
 
-// ── Text-embedded tool call token parsing ──────────────────────────────────
-// Z.ai sometimes emits tool calls as text tokens like:
-//   <|tool_call_begin|>tool_name<|tool_call_argument_begin|>{"arg":"val"}<|tool_call_end|>
-// These must be parsed and emitted as LanguageModelToolCallPart instead of raw text.
-const TOOL_CALL_BEGIN = '<|tool_call_begin|>';
-const TOOL_CALL_ARG_BEGIN = '<|tool_call_argument_begin|>';
-const TOOL_CALL_END = '<|tool_call_end|>';
-
-/**
- * Parse provider control tokens embedded in streamed text content and emit
- * tool calls and visible text appropriately.
- */
-function parseTextEmbeddedToolCalls(
-  input: string,
-  buffer: string,
-  active: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined,
-  emittedKeys: Set<string>,
-): {
-  visibleText: string;
-  newBuffer: string;
-  newActive: typeof active;
-  toolCalls: Array<{ name: string; arguments: string }>;
-} {
-  const toolCalls: Array<{ name: string; arguments: string }> = [];
-  let data = buffer + input;
-  let visibleOut = '';
-  let currentActive = active;
-
-  while (data.length > 0) {
-    if (!currentActive) {
-      const b = data.indexOf(TOOL_CALL_BEGIN);
-      if (b === -1) {
-        // Check for partial prefix at end
-        let longestPartialPrefix = 0;
-        for (let k = Math.min(TOOL_CALL_BEGIN.length - 1, data.length - 1); k > 0; k--) {
-          if (data.endsWith(TOOL_CALL_BEGIN.slice(0, k))) {
-            longestPartialPrefix = k;
-            break;
-          }
-        }
-        if (longestPartialPrefix > 0) {
-          visibleOut += stripControlTokens(data.slice(0, data.length - longestPartialPrefix));
-          data = '';
-          break;
-        }
-        visibleOut += stripControlTokens(data);
-        data = '';
-        break;
-      }
-
-      // Emit any text before the token
-      const pre = data.slice(0, b);
-      if (pre) visibleOut += stripControlTokens(pre);
-      data = data.slice(b + TOOL_CALL_BEGIN.length);
-
-      // Find the argument begin or end token
-      const a = data.indexOf(TOOL_CALL_ARG_BEGIN);
-      const e = data.indexOf(TOOL_CALL_END);
-      let delimIdx = -1;
-      let delimKind: 'arg' | 'end' | undefined;
-      if (a !== -1 && (e === -1 || a < e)) {
-        delimIdx = a;
-        delimKind = 'arg';
-      } else if (e !== -1) {
-        delimIdx = e;
-        delimKind = 'end';
-      } else {
-        // No delimiter yet — buffer the whole thing
-        data = TOOL_CALL_BEGIN + data;
-        break;
-      }
-
-      const header = data.slice(0, delimIdx).trim();
-      const m = header.match(/^([A-Za-z0-9_\-.]+)(?::(\d+))?/);
-      const name = m?.[1];
-      const index = m?.[2] ? Number(m[2]) : undefined;
-      currentActive = { name, index, argBuffer: '', emitted: false };
-
-      if (delimKind === 'arg') {
-        data = data.slice(delimIdx + TOOL_CALL_ARG_BEGIN.length);
-      } else {
-        data = data.slice(delimIdx + TOOL_CALL_END.length);
-        const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
-        if (!emittedKeys.has(key)) {
-          toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: '{}' });
-          emittedKeys.add(key);
-          currentActive.emitted = true;
-        }
-        currentActive = undefined;
-      }
-      continue;
-    }
-
-    // Active tool call — look for end token
-    const e2 = data.indexOf(TOOL_CALL_END);
-    if (e2 === -1) {
-      currentActive.argBuffer += data;
-      if (!currentActive.emitted) {
-        const parsed = tryParseJson(currentActive.argBuffer);
-        if (parsed) {
-          const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
-          if (!emittedKeys.has(key)) {
-            toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: currentActive.argBuffer });
-            emittedKeys.add(key);
-            currentActive.emitted = true;
-          }
-        }
-      }
-      data = '';
-      break;
-    }
-
-    currentActive.argBuffer += data.slice(0, e2);
-    data = data.slice(e2 + TOOL_CALL_END.length);
-    if (!currentActive.emitted) {
-      const key = `${currentActive.name ?? 'unknown'}:${currentActive.argBuffer}`;
-      if (!emittedKeys.has(key)) {
-        toolCalls.push({ name: currentActive.name ?? 'unknown_tool', arguments: currentActive.argBuffer || '{}' });
-        emittedKeys.add(key);
-      }
-    }
-    currentActive = undefined;
-  }
-
-  return { visibleText: visibleOut, newBuffer: data, newActive: currentActive, toolCalls };
-}
-
-function stripControlTokens(text: string): string {
-  return text
-    .replace(/<\|[a-zA-Z0-9_-]+_section_(?:begin|end)\|>/g, '')
-    .replace(/<\|tool_call_(?:argument_)?(?:begin|end)\|>/g, '');
-}
-
-function tryParseJson(text: string): Record<string, unknown> | undefined {
-  if (!text || !text.trim()) return undefined;
-  try {
-    return JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -475,10 +335,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private usageReported = false;
   // Accumulate reasoning_content from streaming response for multi-turn Preserved Thinking
   private accumulatedReasoningContent = '';
-  // Text-embedded tool call parser state
-  private textToolBuffer = '';
-  private textToolActive: { name?: string; index?: number; argBuffer: string; emitted?: boolean } | undefined;
-  private emittedTextToolCallKeys = new Set<string>();
   // User-Agent header for API requests
   private readonly userAgent: string;
   private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>;
@@ -1468,9 +1324,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.log.info(`[Z] provideLanguageModelChatResponse start for model=${model.id}, messages=${messages.length}`);
     // Clear tool call ID mappings and parser state for this new request
     this.clearToolCallIdMappings();
-    this.textToolBuffer = '';
-    this.textToolActive = undefined;
-    this.emittedTextToolCallKeys.clear();
     this.usageMetrics = { promptTokens: 0, completionTokens: 0, cachedTokens: undefined };
     this.usageReported = false;
     // Reset accumulated reasoning_content for new response
@@ -1582,6 +1435,13 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       // Accumulate tool call argument deltas through @agentsy/tool-calls.
       const toolCallAccumulator = new ToolCallAccumulator();
       const emittedToolCalls = new Set<string>();
+      // Z.ai streams tool calls as control tokens inside the text channel:
+      //   <|tool_call_begin|>name<|tool_call_argument_begin|>{...}<|tool_call_end|>
+      // The agentsy parser strips those tokens, returns the visible text for this
+      // chunk, and emits ToolCallAccumulator-compatible deltas. Used directly
+      // rather than through LLMStreamProcessor because the processor buffers text
+      // in a residual and only releases it at flush(), which would stall streaming.
+      const inlineToolCallParser = createZAiInlineToolCallParser();
       const loopRenderer = createVSCodeAgentLoop({
         stream: createProgressStreamAdapter(progress),
         showThinking: true,
@@ -1645,39 +1505,24 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
         const content = normalized.content;
         if (typeof content === 'string' && content.length > 0) {
-          // Parse text-embedded tool call tokens before passing to stream processor
-          const {
-            visibleText,
-            newBuffer,
-            newActive,
-            toolCalls: embeddedCalls,
-          } = parseTextEmbeddedToolCalls(
-            content,
-            this.textToolBuffer,
-            this.textToolActive,
-            this.emittedTextToolCallKeys,
-          );
-          this.textToolBuffer = newBuffer;
-          this.textToolActive = newActive;
+          // Strip inline tool-call control tokens, keeping the visible text for
+          // this chunk so the response still streams incrementally.
+          const parsedChunk = inlineToolCallParser.parse(content, {
+            done: rawFinishReason === 'stop' || rawFinishReason === 'tool_calls',
+          });
 
           // Emit visible text directly; this provider already owns the Progress surface.
-          if (visibleText.length > 0) {
+          if (parsedChunk.content.length > 0) {
             await streamAdapter.write({
-              content: visibleText,
+              content: parsedChunk.content,
               done: rawFinishReason === 'stop' || rawFinishReason === 'tool_calls',
             });
           }
 
-          // Emit any tool calls parsed from text-embedded tokens
-          for (const tc of embeddedCalls) {
-            try {
-              const parsed = JSON.parse(tc.arguments) as Record<string, unknown>;
-              const vsCodeId = this.getOrCreateVsCodeToolCallId(`text_${tc.name}_${Date.now()}`);
-              progress.report(new LanguageModelToolCallPart(vsCodeId, tc.name, parsed));
-              this.log.info(`[Z] text-embedded tool call: ${tc.name} (id=${vsCodeId})`);
-            } catch {
-              this.log.warn(`[Z] Skipping malformed text-embedded tool call for '${tc.name}'.`);
-            }
+          // Feed the extracted deltas into the same accumulator the native
+          // channel uses, so both paths share completion and dedupe handling.
+          for (const delta of parsedChunk.nativeToolCallDeltas ?? []) {
+            toolCallAccumulator.addDelta(delta);
           }
         }
 
@@ -1761,17 +1606,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
       await streamAdapter.end();
       await loopRenderer.end();
-
-      // Flush any remaining text-embedded tool call
-      if (this.textToolActive && this.textToolActive.argBuffer) {
-        const parsed = tryParseJson(this.textToolActive.argBuffer);
-        if (parsed) {
-          const name = this.textToolActive.name ?? 'unknown_tool';
-          const vsCodeId = this.getOrCreateVsCodeToolCallId(`text_${name}_${Date.now()}`);
-          progress.report(new LanguageModelToolCallPart(vsCodeId, name, parsed));
-          this.log.info(`[Z] text-embedded tool call flushed: ${name} (id=${vsCodeId})`);
-        }
-      }
 
       // Report usage metrics before finishing
       this.reportUsageMetrics(progress);

@@ -13,9 +13,9 @@ import {
   isRetryableError,
   McpServerRegistry,
   ProviderErrorCode,
-  UsageStatusBar,
   withRetry,
 } from './agentsy-native.js';
+import { UsageStatusBar } from './usage-status-bar.js';
 
 describe('error mapping', () => {
   it('maps HTTP status codes to provider error codes', () => {
