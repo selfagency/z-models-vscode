@@ -1,4 +1,5 @@
 import { LanguageModelChatInformation } from 'vscode';
+import { MODEL_TOKEN_LIMITS, VISION_MODEL_IDS } from './model-limits.generated.js';
 
 /**
  * Z model configuration
@@ -21,7 +22,19 @@ export function inferToolCallingFromModelId(id: string): boolean {
   return /^glm-/i.test(id);
 }
 
+/**
+ * Vision capability, from the models.dev modalities table rather than a regex.
+ *
+ * The previous pattern missed the current model line: GLM-5.3-Flash and
+ * GLM-5.3-FlashX are the first natively multimodal GLM-5 models, while GLM-5.3
+ * itself is text-only — the reverse of what the id shape suggests. Ids absent
+ * from the generated table fall back to the historical `v` / vision marker check.
+ */
 export function inferVisionFromModelId(id: string): boolean {
+  const normalized = id.trim().toLowerCase().replace(/\[1m\]$/, '');
+  if (MODEL_TOKEN_LIMITS[normalized]) {
+    return VISION_MODEL_IDS.has(normalized);
+  }
   return /(?:\d+(?:\.\d+)?v(?:-|$)|5v(?:-|$)|vision|vl|-ocr)/i.test(id);
 }
 

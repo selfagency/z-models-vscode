@@ -1,6 +1,7 @@
 import { createGenericAdapter } from '@agentsy/providers/adapters';
 import { normalizeZAiChunk } from '@agentsy/providers/normalizers';
 import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/core/tool-calls';
+import { MODEL_TOKEN_LIMITS } from './model-limits.generated.js';
 import {
   calculateRetryDelay,
   cancellationTokenToAbortSignal,
@@ -37,7 +38,13 @@ import {
   window,
   workspace,
 } from 'vscode';
-import { formatModelName, getChatModelInfo, resolveModelCapabilities, type ZModel } from './model-info.js';
+import {
+  formatModelName,
+  getChatModelInfo,
+  inferVisionFromModelId,
+  resolveModelCapabilities,
+  type ZModel,
+} from './model-info.js';
 import { toZRole } from './role-utils.js';
 
 /**
@@ -144,42 +151,30 @@ const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 2000;
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
-const KNOWN_MODEL_TOKEN_LIMITS: Record<string, { maxInputTokens: number; maxOutputTokens?: number }> = {
-  // GLM-5 series (Preserved Thinking enabled by default)
-  'glm-5': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-5.1': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-5-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-5v-turbo': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-5.2': { maxInputTokens: 1_000_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.2
-  'glm-5.3': { maxInputTokens: 200_000, maxOutputTokens: 128_000 }, // Values from https://docs.z.ai/guides/llm/glm-5.3
-
-  // GLM-4.7 series (Preserved Thinking enabled by default)
-  'glm-4.7': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-4.7-flash': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-4.7-flashx': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-
-  // GLM-4.6 series
-  'glm-4.6': { maxInputTokens: 200_000, maxOutputTokens: 128_000 },
-  'glm-4.6v': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
-  'glm-4.6v-flash': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
-  'glm-4.6v-flashx': { maxInputTokens: 128_000, maxOutputTokens: 32_000 },
-
-  // GLM-4.5 series
-  'glm-4.5': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
-  'glm-4.5-air': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
-  'glm-4.5-x': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
-  'glm-4.5-airx': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
-  'glm-4.5-flash': { maxInputTokens: 200_000, maxOutputTokens: 96_000 },
-  'glm-4.5v': { maxInputTokens: 8_000, maxOutputTokens: 16_000 },
-
-  // Other models
-  'glm-4-32b-0414-128k': { maxInputTokens: 128_000, maxOutputTokens: 16_000 },
-  'autoglm-phone-multilingual': { maxInputTokens: 64_000, maxOutputTokens: 4_000 },
-};
+const DEFAULT_MAX_INPUT_TOKENS = 200_000;
 
 export function getKnownTokenLimits(id: string): { maxInputTokens?: number; maxOutputTokens?: number } {
-  const normalized = id.toLowerCase();
-  return KNOWN_MODEL_TOKEN_LIMITS[normalized] ?? {};
+  const normalized = normalizeModelId(id);
+  const exact = MODEL_TOKEN_LIMITS[normalized];
+  if (exact) return exact;
+
+  // Fall back to the longest matching family prefix so that variant ids
+  // (e.g. `glm-5.3-flash`, `glm-5.3-flashx`, `glm-5.3-thinking`) inherit the
+  // family's window instead of falling through to the 32K default. Families are
+  // checked longest-first so `glm-5.3` cannot shadow `glm-5.3-flash`.
+  const families = Object.keys(MODEL_TOKEN_LIMITS)
+    .filter(key => key !== normalized && normalized.startsWith(key))
+    .sort((a, b) => b.length - a.length);
+
+  return families.length > 0 ? MODEL_TOKEN_LIMITS[families[0]] : {};
+}
+
+/**
+ * Normalize a model id for table lookup: lowercase, and drop any context-suffix
+ * marker (Z.ai exposes long-context variants as `<id>[1m]`).
+ */
+function normalizeModelId(id: string): string {
+  return id.trim().toLowerCase().replace(/\[1m\]$/, '');
 }
 
 export function modelThinksCompulsorily(modelId: string): boolean {
@@ -574,19 +569,24 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       const found = this.fetchedModels.find(m => m.id === modelId);
       return found?.supportsVision ?? false;
     }
-    return /(?:4\.5v|4\.6v|5v|vision|vl)/i.test(modelId);
+    return inferVisionFromModelId(modelId);
   }
 
   /**
    * Pick a fallback vision model for image input.
+   *
+   * Preference order matters: GLM-5.3-Flash / FlashX are the current
+   * natively-multimodal models, while glm-4.6v is no longer returned by either
+   * live endpoint (verified against /models on 2026-10-05) and is kept last only
+   * as a last resort.
    */
   private getVisionFallbackModelId(): string | undefined {
-    if (this.fetchedModels) {
-      const preferred = this.fetchedModels.find(m => m.id === 'glm-4.6v' && m.supportsVision);
-      if (preferred) return preferred.id;
-      return this.fetchedModels.find(m => m.supportsVision)?.id;
+    const visionModels = this.fetchedModels?.filter(m => m.supportsVision) ?? [];
+    for (const preferred of ['glm-5.3-flash', 'glm-5.3-flashx', 'glm-5v-turbo', 'glm-4.6v']) {
+      const match = visionModels.find(m => m.id === preferred);
+      if (match) return match.id;
     }
-    return 'glm-4.6v';
+    return visionModels[0]?.id;
   }
 
   /**
@@ -1225,52 +1225,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   }
 
   /**
-   * Fetch token limits for a specific model from the Z API.
-   * Falls back to known hardcoded limits if the API request fails.
-   */
-  private async fetchModelTokenLimits(
-    modelId: string,
-    abortSignal?: AbortSignal,
-  ): Promise<{ maxInputTokens?: number; maxOutputTokens?: number }> {
-    try {
-      if (!this.client) {
-        return getKnownTokenLimits(modelId);
-      }
-
-      const baseUrl = this.getConfiguredBaseUrl().replace(/\/$/, '');
-      const apiKey = await this.getApiKeyFromSecretsOrEnv();
-      if (!apiKey) {
-        return getKnownTokenLimits(modelId);
-      }
-
-      interface ModelLimitResponse {
-        context_window?: number;
-        max_tokens?: number;
-        max_completion_tokens?: number;
-      }
-      const response = await got
-        .get(`${baseUrl}/models/${modelId}`, {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'User-Agent': this.userAgent,
-            'Accept-Language': 'en-US,en',
-          },
-          signal: abortSignal,
-        })
-        .json<ModelLimitResponse>();
-
-      return {
-        maxInputTokens: response.context_window ?? getKnownTokenLimits(modelId).maxInputTokens,
-        maxOutputTokens:
-          response.max_completion_tokens ?? response.max_tokens ?? getKnownTokenLimits(modelId).maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-      };
-    } catch {
-      // Fall back to known limits if API fetch fails
-      return getKnownTokenLimits(modelId);
-    }
-  }
-
-  /**
    * Fetch available chat models from the Z API and cache the result.
    * Returns an empty array if the client is not initialized or the request fails.
    */
@@ -1285,32 +1239,16 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     try {
       let zModels: ZModel[] = [];
-      let usedClientList = false;
 
       // Compatibility path: tests and advanced users can inject a custom client with models.list().
       if (this.client?.models?.list) {
-        usedClientList = true;
         const response = await this.client.models.list(abortSignal);
         zModels = Array.isArray(response?.data) ? (response.data as ZModel[]) : [];
       }
 
-      // Fallback curated set when API/model listing is unavailable.
-      if ((!Array.isArray(zModels) || zModels.length === 0) && !usedClientList) {
-        zModels = [
-          {
-            id: 'glm-5.1',
-            name: 'GLM 5.1',
-            detail: 'Latest GLM model',
-            maxInputTokens: 128000,
-            maxOutputTokens: 16384,
-            defaultCompletionTokens: 16384,
-            temperature: 0.7,
-            toolCalling: true,
-            supportsVision: true,
-            supportsParallelToolCalls: true,
-          },
-        ];
-      }
+      // No curated fallback: a hardcoded list would advertise models the API no
+      // longer serves (the previous one listed only glm-5.1). Returning empty
+      // makes VS Code show "no models" rather than an unreachable model.
 
       if (!Array.isArray(zModels) || zModels.length === 0) {
         this.fetchedModels = [];
@@ -1320,27 +1258,28 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
       const chatModels = zModels.filter(m => resolveModelCapabilities(m).completionChat !== false);
 
-      // Fetch token limits in parallel for all models
-      const rawModels = await Promise.all(
-        chatModels.map(async m => {
-          const tokenLimits = await this.fetchModelTokenLimits(m.id, abortSignal);
-          return {
-            capabilities: resolveModelCapabilities(m),
-            id: m.id,
-            originalName: m.name ?? formatModelName(m.id),
-            detail: m.detail ?? undefined,
-            maxInputTokens: m.maxInputTokens ?? tokenLimits.maxInputTokens ?? 32768,
-            maxOutputTokens: m.maxOutputTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-            defaultCompletionTokens:
-              m.defaultCompletionTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
-            toolCalling: resolveModelCapabilities(m).functionCalling,
-            supportsParallelToolCalls: m.supportsParallelToolCalls ?? resolveModelCapabilities(m).functionCalling,
-            supportsVision: resolveModelCapabilities(m).vision,
-            temperature: m.temperature ?? undefined,
-            top_p: m.top_p ?? undefined,
-          };
-        }),
-      );
+      // Token limits come from the local table: Z.ai exposes no per-model context
+      // window (GET /models/{id} returns only id/object/created/owned_by), so this
+      // is a synchronous lookup rather than a per-model request.
+      const rawModels = chatModels.map(m => {
+        const caps = resolveModelCapabilities(m);
+        const tokenLimits = getKnownTokenLimits(m.id);
+        return {
+          capabilities: caps,
+          id: m.id,
+          originalName: m.name ?? formatModelName(m.id),
+          detail: m.detail ?? undefined,
+          maxInputTokens: m.maxInputTokens ?? tokenLimits.maxInputTokens ?? DEFAULT_MAX_INPUT_TOKENS,
+          maxOutputTokens: m.maxOutputTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          defaultCompletionTokens:
+            m.defaultCompletionTokens ?? tokenLimits.maxOutputTokens ?? DEFAULT_COMPLETION_TOKENS,
+          toolCalling: caps.functionCalling,
+          supportsParallelToolCalls: m.supportsParallelToolCalls ?? caps.functionCalling,
+          supportsVision: caps.vision,
+          temperature: m.temperature ?? undefined,
+          top_p: m.top_p ?? undefined,
+        };
+      });
 
       const modelsToUse = rawModels;
 
