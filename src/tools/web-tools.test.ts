@@ -106,7 +106,8 @@ describe('ZWebSearchTool', () => {
   it('returns a LanguageModelToolResult containing the search text', async () => {
     gotPost.mockReturnValue({
       json: vi.fn().mockResolvedValue({
-        search_results: [
+        // Field name per https://docs.z.ai/api-reference/tools/web-search.
+        search_result: [
           { title: 'Result One', link: 'https://example.com/1', content: 'First snippet', publish_date: '2026-01-01' },
           { title: 'Result Two', link: 'https://example.com/2', content: 'Second snippet' },
         ],
@@ -123,18 +124,19 @@ describe('ZWebSearchTool', () => {
   });
 
   it('posts to the web_search endpoint with the query', async () => {
-    gotPost.mockReturnValue({ json: vi.fn().mockResolvedValue({ search_results: [] }) });
+    gotPost.mockReturnValue({ json: vi.fn().mockResolvedValue({ search_result: [] }) });
     await tool.invoke({ input: { query: 'hello', count: 3 }, toolInvocationToken: undefined }, mockToken);
     expect(gotPost).toHaveBeenCalledWith(
       expect.stringContaining('/web_search'),
       expect.objectContaining({
-        json: expect.objectContaining({ search_query: 'hello', count: 3 }),
+        // search_engine accepts only `search-prime` per the OpenAPI enum.
+        json: expect.objectContaining({ search_engine: 'search-prime', search_query: 'hello', count: 3 }),
       }),
     );
   });
 
   it('returns a sensible message for empty results', async () => {
-    gotPost.mockReturnValue({ json: vi.fn().mockResolvedValue({ search_results: [] }) });
+    gotPost.mockReturnValue({ json: vi.fn().mockResolvedValue({ search_result: [] }) });
     const result = await tool.invoke({ input: { query: 'nothing' }, toolInvocationToken: undefined }, mockToken);
     expect(textOf(result)).toContain('No search results found');
   });
