@@ -148,7 +148,9 @@ export const window = {
     appendLine: vi.fn(),
     dispose: vi.fn(),
   }),
-  createStatusBarItem: vi.fn().mockReturnValue({
+  // Returns a distinct item per call, matching the real API. Tests rely on this
+  // to count how many items an implementation actually creates.
+  createStatusBarItem: vi.fn(() => ({
     text: '',
     tooltip: '',
     command: undefined,
@@ -156,7 +158,7 @@ export const window = {
     hide: vi.fn(),
     dispose: vi.fn(),
     backgroundColor: undefined,
-  }),
+  })),
 };
 
 export const lm = {
