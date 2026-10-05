@@ -1,7 +1,7 @@
 {
   "name": "z-models-vscode",
   "displayName": "Z.ai for Copilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Access Z.ai (Zhipu) models within GitHub Copilot Chat",
   "categories": [
     "AI",
@@ -22,7 +22,7 @@
     "type": "git",
     "url": "https://github.com/selfagency/z-models-vscode.git"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "qna": "marketplace",
   "author": {
     "name": "Daniel Sieradski",
@@ -38,6 +38,7 @@
     "format": "oxfmt 'src/**/*.ts' --write",
     "lint:fix": "oxlint src --fix",
     "lint": "oxlint src",
+    "models:sync": "node ./scripts/sync-model-limits.mjs",
     "package": "pnpm run check-types && pnpm run lint && NODE_ENV=production tsup && node scripts/check-bundle.mjs",
     "prepare": "husky",
     "release": "zx ./scripts/release.mjs",
@@ -101,7 +102,11 @@
       },
       {
         "command": "z-chat.toggleUsageView",
-        "title": "Z: Toggle Usage View (Hourly/Weekly)"
+        "title": "Z: Toggle Usage View (5-Hour/Weekly)"
+      },
+      {
+        "command": "z-chat.resetUsageView",
+        "title": "Z: Reset Usage Display"
       }
     ],
     "configuration": {
@@ -152,7 +157,7 @@
           "type": "number",
           "default": 5,
           "minimum": 1,
-          "description": "How often (in minutes) to refresh Z.ai usage data"
+          "description": "How often (in minutes) to refresh Z.ai usage data. Each refresh makes a single quota request."
         },
         "zModels.tools.webSearch": {
           "type": "boolean",
