@@ -432,6 +432,24 @@ export function activate(context: vscode.ExtensionContext) {
     ],
   };
   context.subscriptions.push(participant);
+
+  // Integration-test handles, gated on ExtensionMode.Test so nothing is added to
+  // the production command surface: there is no `__test*` command in a normal
+  // install. The streaming e2e test needs the real registered provider, not a
+  // reconstruction, because the bug it guards (text buffered until the response
+  // completed) only appears when the whole chain runs: HTTP -> SSE -> provider
+  // -> VS Code progress surface.
+  if (context.extensionMode === vscode.ExtensionMode.Test) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('z-models-vscode.__testProvider', () => getProvider()),
+      vscode.commands.registerCommand('z-models-vscode.__testSeedApiKey', (key: string) =>
+        context.secrets.store('Z_API_KEY', key),
+      ),
+      vscode.commands.registerCommand('z-models-vscode.__testClearApiKey', () =>
+        context.secrets.delete('Z_API_KEY'),
+      ),
+    );
+  }
 }
 
 export function deactivate() {
