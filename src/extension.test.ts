@@ -148,7 +148,7 @@ describe('extension', () => {
       lmWithRegister.registerTool = old;
     });
 
-    it('executes manageSettings command and shows coding endpoint info', async () => {
+    it('executes manageSettings and opens the settings quick pick', async () => {
       activate(mockContext);
       const call = (commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls.find(
         ([name]) => name === 'z-chat.manageSettings',
@@ -157,12 +157,16 @@ describe('extension', () => {
 
       await handler();
 
-      expect(window.showInformationMessage).toHaveBeenCalledWith(
-        'Z.ai for Copilot uses the dedicated coding endpoint: https://api.z.ai/api/coding/paas/v4',
-      );
+      expect(window.showQuickPick).toHaveBeenCalled();
+      const items = (window.showQuickPick as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as Array<
+        { label: string; description?: string }
+      >;
+      expect(items.some(i => i.label.includes('API endpoint'))).toBe(true);
+      expect(items.some(i => i.label.includes('Validate stored API key'))).toBe(true);
+      expect(items.some(i => i.label.includes('Clear stored API key'))).toBe(true);
     });
 
-    it('executes manageSettings command without mutating endpoint configuration', async () => {
+    it('manageSettings does not mutate configuration until an item is picked', async () => {
       activate(mockContext);
       const call = (commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls.find(
         ([name]) => name === 'z-chat.manageSettings',
@@ -173,6 +177,8 @@ describe('extension', () => {
         update: vi.fn().mockResolvedValue(undefined),
       };
       vi.spyOn(workspace, 'getConfiguration').mockReturnValue(config as any);
+      // User dismisses the picker.
+      (window.showQuickPick as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
       await handler();
 
