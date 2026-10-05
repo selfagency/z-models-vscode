@@ -587,6 +587,14 @@ export interface UsageQuota {
   total: number;
   unit: 'tokens' | 'credits' | 'requests';
   window: 'hourly' | 'daily' | 'weekly' | 'monthly';
+  /**
+   * Human-readable window as reported by the API, e.g. "5-Hour" or "1-Week".
+   * Preferred over `window` for display because the API's windows do not map
+   * cleanly onto hour/day granularity (a unit-3 window is a 5-hour window).
+   */
+  windowLabel?: string;
+  /** Plan level reported by the API, e.g. "lite" / "pro" / "max". */
+  planLevel?: string;
   percentUsed: number;
   expiresAt?: Date;
 }
@@ -603,13 +611,17 @@ export interface UsageStatusBarConfig {
   warningThreshold?: number;
   errorThreshold?: number;
   refreshIntervalMs?: number;
-  onClickRefresh?: () => Promise<void>;
+  /**
+   * VS Code command invoked when the status bar item is clicked. Required for the
+   * item to be interactive — without it the click is silently ignored.
+   */
+  clickCommand?: string;
   quotaDataSource: IQuotaDataSource;
   colorScheme?: { normal: string; warning: string; error: string };
 }
 
 const DEFAULT_REFRESH_INTERVAL = 60_000;
-const DEFAULT_TOOLTIP = '{{used}} / {{total}} {{unit}} used ({{percent}}%)';
+const DEFAULT_TOOLTIP = '{{window}} window: {{used}} / {{total}} {{unit}} used ({{percent}}%)';
 const DEFAULT_WARNING_THRESHOLD = 0.8;
 const DEFAULT_ERROR_THRESHOLD = 0.95;
 
@@ -617,24 +629,32 @@ const DEFAULT_ERROR_THRESHOLD = 0.95;
 export class UsageStatusBar {
   private statusBarItem: vscode.StatusBarItem | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
-  private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly config: UsageStatusBarConfig) {}
 
-  async show(): Promise<void> {
+  /**
+   * Show the status bar item. Idempotent: repeated calls reuse the existing item
+   * and timer instead of stacking a new item + interval on every invocation.
+   * (Stacking was the reported "usage bar multiplies" bug.)
+   */
+  async show(): Promise<UsageQuota | undefined> {
     try {
-      const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-      if (!item) return;
-      this.statusBarItem = item;
-      if (this.config.onClickRefresh) {
-        item.command = 'agentsy.refreshUsage';
+      if (!this.statusBarItem) {
+        const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        if (!item) return undefined;
+        this.statusBarItem = item;
+        if (this.config.clickCommand) {
+          item.command = this.config.clickCommand;
+        }
       }
-      this.disposables.push(item);
-      await this.refresh();
-      item.show();
+
+      const quota = await this.refresh();
+      this.statusBarItem.show();
       this.startAutoRefresh();
+      return quota;
     } catch {
       // No-op if VS Code is unavailable.
+      return undefined;
     }
   }
 
@@ -652,13 +672,22 @@ export class UsageStatusBar {
     if (!this.statusBarItem) return;
     const item = this.statusBarItem;
     const percent = Math.round(quota.percentUsed * 100);
-    item.text = `$(pulse) ${this.config.displayName}: ${quota.used.toLocaleString()} / ${quota.total.toLocaleString()} ${quota.unit}`;
+    const window = quota.windowLabel ?? quota.window;
+    item.text = `$(pulse) ${this.config.displayName}: ${percent}% of ${window}`;
     const template = this.config.tooltipTemplate ?? DEFAULT_TOOLTIP;
-    item.tooltip = template
-      .replace('{{used}}', quota.used.toLocaleString())
-      .replace('{{total}}', quota.total.toLocaleString())
-      .replace('{{unit}}', quota.unit)
-      .replace('{{percent}}', String(percent));
+    const plan = quota.planLevel ? `Z.ai ${quota.planLevel.toUpperCase()} plan\n` : '';
+    const reset = quota.expiresAt
+      ? `\nResets ${quota.expiresAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+      : '';
+    item.tooltip =
+      plan +
+      template
+        .replace('{{used}}', quota.used.toLocaleString())
+        .replace('{{total}}', quota.total.toLocaleString())
+        .replace('{{unit}}', quota.unit)
+        .replace('{{percent}}', String(percent))
+        .replace('{{window}}', window) +
+      reset;
     item.color = this.pickColor(quota.percentUsed);
   }
 
@@ -672,20 +701,34 @@ export class UsageStatusBar {
     return colorScheme.normal;
   }
 
+  /** Hide the item and stop polling. Safe to call repeatedly. */
   hide(): void {
-    if (this.statusBarItem) {
-      this.statusBarItem.hide();
-    }
+    this.stopAutoRefresh();
+    this.statusBarItem?.hide();
+  }
+
+  /**
+   * Change the auto-refresh cadence. Takes effect immediately if polling is
+   * currently running; if the bar is hidden, the new interval applies on the
+   * next show().
+   */
+  setRefreshInterval(ms: number): void {
+    if (this.config.refreshIntervalMs === ms) return;
+    this.config.refreshIntervalMs = ms;
+    if (this.refreshTimer === undefined) return;
+    this.stopAutoRefresh();
+    this.startAutoRefresh();
   }
 
   dispose(): void {
     this.stopAutoRefresh();
-    for (const d of this.disposables) d.dispose();
-    this.disposables.length = 0;
+    this.statusBarItem?.dispose();
+    this.statusBarItem = undefined;
     this.config.quotaDataSource.dispose?.();
   }
 
   private startAutoRefresh(): void {
+    if (this.refreshTimer !== undefined) return;
     const interval = this.config.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL;
     this.refreshTimer = setInterval(() => {
       void this.refresh();

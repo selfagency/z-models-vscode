@@ -3,12 +3,23 @@ import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar }
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
 import { ZWebFetchTool, ZWebSearchTool } from './tools/web-tools.js';
-import { UsageService } from './usage-service.js';
+import { showSettingsUI } from './settings-ui.js';
+import { type TokenQuota, UsageService } from './usage-service.js';
 
 let activeProvider: ZChatModelProvider | undefined;
 let activeUsageService: UsageService | undefined;
 let activeUsageBar: UsageStatusBar | undefined;
-let usageRefreshTimer: ReturnType<typeof setInterval> | undefined;
+
+/** Status bar refresh cadence in ms, from `zModels.usage.refreshInterval` (minutes). */
+function getUsageRefreshMs(): number {
+  const minutes = vscode.workspace.getConfiguration('zModels').get<number>('usage.refreshInterval', 5);
+  return Math.max(1, minutes) * 60_000;
+}
+
+/** Whether the usage status bar is enabled by settings. */
+function usageEnabled(): boolean {
+  return vscode.workspace.getConfiguration('zModels').get<boolean>('usage.enabled', true) !== false;
+}
 
 // Read extension version for User-Agent at module level
 let extVersion = 'unknown';
@@ -129,11 +140,9 @@ export function activate(context: vscode.ExtensionContext) {
         await getProvider().setApiKey();
         await updateApiKeyContext();
       }),
-      vscode.commands.registerCommand('z-chat.manageSettings', async () => {
-        await vscode.window.showInformationMessage(
-          'Z.ai for Copilot uses the dedicated coding endpoint: https://api.z.ai/api/coding/paas/v4',
-        );
-      }),
+      vscode.commands.registerCommand('z-chat.manageSettings', () =>
+        showSettingsUI({ context, log: logOutputChannel, getApiKey }),
+      ),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown command registration error';
@@ -206,15 +215,17 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Usage tracking status bar ──────────────────────────────────────────
   let usageViewMode: 'hourly' | 'weekly' = 'hourly';
 
-  const pickHourlyQuota = (quotas: Array<{ unit: number; number: number; percentage: number; nextResetTime?: number }>) => {
-    const hourly = quotas.filter(q => q.unit === 3).sort((a, b) => a.number - b.number);
-    return hourly.length > 0 ? hourly[0] : quotas[0];
-  };
+  /**
+   * Select the quota window for the active view. Z.ai reports the 5-hour window
+   * as unit=3/number=5 and the weekly window as unit=6/number=1, so unit alone
+   * is the reliable discriminator here (the Z.ai quota API returns one TOKENS_LIMIT
+   * row per window).
+   */
+  const pickHourlyQuota = (quotas: TokenQuota[]): TokenQuota | undefined =>
+    quotas.find(q => q.unit === 3) ?? quotas[0];
 
-  const pickWeeklyQuota = (quotas: Array<{ unit: number; number: number; percentage: number; nextResetTime?: number }>) => {
-    const weekly = quotas.filter(q => q.unit === 6).sort((a, b) => a.number - b.number);
-    return weekly.length > 0 ? weekly[0] : pickHourlyQuota(quotas);
-  };
+  const pickWeeklyQuota = (quotas: TokenQuota[]): TokenQuota | undefined =>
+    quotas.find(q => q.unit === 6) ?? pickHourlyQuota(quotas);
 
   const mapWindow = (unit: number): UsageQuota['window'] => {
     if (unit === 3) return 'hourly';
@@ -233,15 +244,22 @@ export function activate(context: vscode.ExtensionContext) {
         throw new Error(result.error ?? 'No usage quota available');
       }
 
-      const selected = usageViewMode === 'hourly'
-        ? pickHourlyQuota(result.data.tokenQuotas)
-        : pickWeeklyQuota(result.data.tokenQuotas);
+      const selected =
+        usageViewMode === 'hourly'
+          ? pickHourlyQuota(result.data.tokenQuotas)
+          : pickWeeklyQuota(result.data.tokenQuotas);
+
+      if (!selected) {
+        throw new Error('No usage quota available');
+      }
 
       return {
         used: selected.percentage,
         total: 100,
         unit: 'tokens',
         window: mapWindow(selected.unit),
+        windowLabel: selected.windowName,
+        planLevel: result.data.planLevel,
         percentUsed: Math.max(0, Math.min(1, selected.percentage / 100)),
         expiresAt: selected.nextResetTime ? new Date(selected.nextResetTime) : undefined,
       };
@@ -253,17 +271,23 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const usageBar = new UsageStatusBar({
-    displayName: 'Z.ai Usage',
+    displayName: 'Z.ai',
     warningThreshold: 0.8,
     errorThreshold: 0.95,
-    refreshIntervalMs: 60_000,
+    // The status bar owns the only refresh timer; the setting feeds its cadence
+    // rather than adding a second competing interval.
+    refreshIntervalMs: getUsageRefreshMs(),
+    clickCommand: 'z-chat.toggleUsageView',
     quotaDataSource,
   });
   activeUsageBar = usageBar;
   context.subscriptions.push(usageBar);
-  void usageBar.show();
 
   const refreshUsage = async () => {
+    if (!usageEnabled()) {
+      usageBar.hide();
+      return;
+    }
     const apiKey = await getApiKey();
     if (!apiKey || !apiKey.trim()) {
       usageBar.hide();
@@ -276,10 +300,10 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         svc.updateApiKey(apiKey);
       }
-      await usageBar.show();
-      const quota = await usageBar.refresh();
+      // show() already refreshes; do not issue a second quota fetch here.
+      const quota = await usageBar.show();
       if (quota) {
-        logOutputChannel?.info(`[Z] Usage updated: ${Math.round(quota.percentUsed * 100)}% (${quota.window})`);
+        logOutputChannel?.info(`[Z] Usage updated: ${Math.round(quota.percentUsed * 100)}% (${quota.windowLabel ?? quota.window})`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -287,22 +311,25 @@ export function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const toggleUsageView = async () => {
+    usageViewMode = usageViewMode === 'hourly' ? 'weekly' : 'hourly';
+    logOutputChannel?.info(`[Z] Usage view switched to ${usageViewMode}`);
+    await refreshUsage();
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('z-chat.refreshUsage', refreshUsage),
-    vscode.commands.registerCommand('z-chat.toggleUsageView', async () => {
-      usageViewMode = usageViewMode === 'hourly' ? 'weekly' : 'hourly';
+    vscode.commands.registerCommand('z-chat.toggleUsageView', toggleUsageView),
+    vscode.commands.registerCommand('z-chat.resetUsageView', async () => {
+      usageViewMode = 'hourly';
+      usageBar.hide();
       await refreshUsage();
+      logOutputChannel?.info('[Z] Usage display reset');
     }),
   );
 
-  // Initial fetch + periodic refresh
+  // Initial fetch. Ongoing refresh is owned by UsageStatusBar's single timer.
   void refreshUsage();
-  const setupRefreshTimer = () => {
-    if (usageRefreshTimer) clearInterval(usageRefreshTimer);
-    const interval = vscode.workspace.getConfiguration('zModels').get<number>('usage.refreshInterval', 5);
-    usageRefreshTimer = setInterval(() => void refreshUsage(), interval * 60_000);
-  };
-  setupRefreshTimer();
 
   // Refresh when API key changes
   if (context.secrets?.onDidChange) {
@@ -320,11 +347,17 @@ export function activate(context: vscode.ExtensionContext) {
     });
   }
 
-  // Adjust refresh interval when settings change
+  // Adjust refresh cadence / visibility when settings change
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('zModels.usage.refreshInterval')) {
-        setupRefreshTimer();
+        usageBar.setRefreshInterval(getUsageRefreshMs());
+      }
+      if (
+        event.affectsConfiguration('zModels.usage.enabled') ||
+        event.affectsConfiguration('zModels.usage.refreshInterval')
+      ) {
+        void refreshUsage();
       }
     }),
   );
@@ -401,10 +434,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  if (usageRefreshTimer) {
-    clearInterval(usageRefreshTimer);
-    usageRefreshTimer = undefined;
-  }
   if (activeUsageBar) {
     activeUsageBar.dispose();
     activeUsageBar = undefined;

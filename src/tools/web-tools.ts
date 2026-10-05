@@ -45,6 +45,9 @@ function friendlyError(status: number): string {
   if (status === 401 || status === 403) {
     return 'Z.ai web tools could not authenticate. Please check your Z.ai API key.';
   }
+  if (status === 429) {
+    return 'Z.ai web search is rate-limited or out of quota. Check your Z.ai plan balance.';
+  }
   return `Z.ai web tool request failed with status ${status}. Please try again.`;
 }
 
@@ -56,9 +59,19 @@ interface SearchResult {
   publish_date?: string;
 }
 
+interface SearchResponseBody {
+  /** Field per the Z.ai OpenAPI spec (singular). Older responses used plural. */
+  search_result?: SearchResult[];
+  search_results?: SearchResult[];
+}
+
 /**
  * First-party web search tool backed by the Z.ai web_search API.
  * Independent of MCP servers; calls the provider's own API directly.
+ *
+ * Request/response shapes follow https://docs.z.ai/api-reference/tools/web-search:
+ * `search_engine` accepts only `search-prime` (the spec's enum), and results
+ * come back under `search_result`.
  */
 export class ZWebSearchTool implements vscode.LanguageModelTool<{ query: string; count?: number }> {
   constructor(private readonly deps: WebToolDeps) {}
@@ -90,12 +103,12 @@ export class ZWebSearchTool implements vscode.LanguageModelTool<{ query: string;
       const body = await got
         .post(`${baseUrl}/web_search`, {
           headers: authHeaders(apiKey),
-          json: { search_engine: 'search_pro_jina', search_query: query, count },
+          json: { search_engine: 'search-prime', search_query: query, count },
           timeout: { request: 30000 },
         })
-        .json<{ search_results?: SearchResult[] }>();
+        .json<SearchResponseBody>();
 
-      const results = Array.isArray(body?.search_results) ? body.search_results : [];
+      const results = body?.search_result ?? body?.search_results ?? [];
       if (results.length === 0) {
         return toToolResult(`No search results found for "${query}".`);
       }

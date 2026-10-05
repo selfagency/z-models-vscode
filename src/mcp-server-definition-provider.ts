@@ -7,15 +7,20 @@ import {
 import * as vscode from 'vscode';
 
 const MCP_URLS = {
-  // Web Search MCP endpoint per https://docs.z.ai/guides/tools/web-search
-  search: 'https://api.z.ai/api/mcp/web_search/sse',
+  // Web Search MCP endpoint per https://docs.z.ai/devpack/mcp/search-mcp-server
+  //
+  // The search endpoint moved from /api/mcp/web_search/sse to
+  // /api/mcp/web_search_prime/mcp, and the exposed tool was renamed
+  // `webSearch` -> `webSearchPrime`. Both names are accepted when matching tool
+  // calls so an in-flight chat session keeps resolving after the upgrade.
+  search: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
   reader: 'https://api.z.ai/api/mcp/web_reader/mcp',
   zread: 'https://api.z.ai/api/mcp/zread/mcp',
 } as const;
 
 const MCP_SERVER_VERSION = '1.0.0';
 const VISION_MCP_COMMAND = 'npx';
-const VISION_MCP_ARGS = ['-y', '@z_ai/mcp-server@0.1.4']; // pinned to avoid @latest supply-chain drift
+const VISION_MCP_ARGS = ['-y', '@z_ai/mcp-server@0.1.5']; // pinned to avoid @latest supply-chain drift
 
 /**
  * Registers Z.AI managed MCP servers as HTTP MCP definitions.

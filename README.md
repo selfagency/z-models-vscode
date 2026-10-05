@@ -40,6 +40,21 @@
 2. **Open Command Palette** (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 3. **Run:** `Z: Manage API Key`
 4. **Enter your API key** from [z.ai](https://z.ai/manage-apikey/apikey-list)
+5. *(Optional)* Run `Z: Manage Settings` to pick an endpoint, tune the usage status bar, validate the stored key, or clear it
+
+### Settings via the Command Palette
+
+`Z: Manage Settings` opens a picker for everything that changes behaviour:
+
+| Entry | What it does |
+| --- | --- |
+| **API endpoint** | Switch between the Coding Plan endpoint, the general `api.z.ai` endpoint, and the two `open.bigmodel.cn` equivalents |
+| **Usage refresh interval** | Minutes between status-bar quota refreshes (default 5) |
+| **Usage status bar** | Show or hide the quota item |
+| **MCP servers** | Toggle the Vision, Search, Reader, and Zread MCP servers individually |
+| **First-party tools** | Toggle `webSearch` and `webFetch` |
+| **Validate stored API key** | Calls the live quota endpoint and reports the plan and quota windows, so a wrong key or a non-Coding-Plan key is distinguishable from a chat failure |
+| **Replace / Clear stored API key** | Re-enter or delete the key in VS Code secrets |
 
 ## 🔑 Getting Your API Key
 
@@ -70,22 +85,28 @@ Type `@z` in any Copilot Chat input to direct the conversation to Z.ai. The part
 
 ### Usage Status Bar
 
-When a `Z_API_KEY` is configured, the extension shows a usage item on the right side of the status bar. Click the status bar item to toggle between hourly and weekly views.
+When a `Z_API_KEY` is configured, the extension shows a usage item on the right side of the status bar. Click the status bar item to toggle between the 5-hour and weekly windows.
+
+The item text shows the window the percentage applies to (for example `Z.ai: 42% of 5-Hour`), so the number is never ambiguous.
 
 Tooltip includes:
 
-- Token quota windows and progress bars
-- MCP time-limit usage windows
-- Last updated time
+- Your plan level (`lite`, `pro`, `max`, ...)
+- The active quota window and how full it is
+- When that window resets
 
-You can also refresh usage manually via command palette:
+Each refresh makes exactly one request to `api.z.ai/api/monitor/usage/quota/limit`.
+
+Commands:
 
 - `Z: Refresh Usage Stats`
+- `Z: Toggle Usage View (5-Hour/Weekly)`
+- `Z: Reset Usage Display`
 
 Related settings:
 
 - `zModels.usage.enabled`
-- `zModels.usage.refreshInterval`
+- `zModels.usage.refreshInterval` (minutes between refreshes)
 
 ### Advanced `modelOptions` support
 
@@ -208,6 +229,6 @@ Open the project in VS Code and press **F5** to launch the Extension Development
 
 ## 📄 License
 
-MIT License - See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later - See [LICENSE](LICENSE) for details.
 
 Maintained by [Daniel Sieradski](https://self.agency) ([@selfagency](https://github.com/selfagency)).
