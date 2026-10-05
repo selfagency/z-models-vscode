@@ -1,6 +1,5 @@
-import { createGenericAdapter } from '@agentsy/providers/adapters';
 import { normalizeZAiChunk } from '@agentsy/providers/normalizers';
-import { createZAiInlineToolCallParser } from '@agentsy/core/processor';
+import { createZAiInlineToolCallParser, LLMStreamProcessor } from '@agentsy/core/processor';
 import { buildNativeToolsArray, buildToolResultMessage, ToolCallAccumulator } from '@agentsy/core/tool-calls';
 import { MODEL_TOKEN_LIMITS } from './model-limits.generated.js';
 import {
@@ -64,6 +63,31 @@ interface ProgressChatStream {
    * Test helper to set accumulated reasoning content.
    * Only intended for use in tests to access private state.
    */
+}
+
+/**
+ * Build the VS Code renderer used for Z.ai chat responses.
+ *
+ * Exported so the streaming contract is testable: the processor option below is
+ * load-bearing, and nothing else in the codebase would fail if it were dropped.
+ */
+export function createZAIStreamRenderer(
+  progress: Progress<LanguageModelResponsePartWithThinking>,
+  abortSignal: AbortSignal,
+) {
+  // The loop renderer builds its own LLMStreamProcessor, and the default one
+  // buffers: scrubContextTags defaults to true, which makes the processor hold
+  // all text in a residual and release it only on flush(). That produced an
+  // extension where nothing appeared in the chat UI until a response finished.
+  // Supply one that streams, since the inline tool-call parser has already
+  // stripped the control tokens and there is nothing left to scrub.
+  return createVSCodeAgentLoop({
+    stream: createProgressStreamAdapter(progress),
+    showThinking: true,
+    thinkingStyle: 'progress',
+    abortSignal,
+    processor: new LLMStreamProcessor({ scrubContextTags: false }),
+  });
 }
 
 export function createProgressStreamAdapter(progress: Progress<LanguageModelResponsePartWithThinking>): ProgressChatStream {
@@ -1442,31 +1466,21 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
       // rather than through LLMStreamProcessor because the processor buffers text
       // in a residual and only releases it at flush(), which would stall streaming.
       const inlineToolCallParser = createZAiInlineToolCallParser();
-      const loopRenderer = createVSCodeAgentLoop({
-        stream: createProgressStreamAdapter(progress),
-        showThinking: true,
-        thinkingStyle: 'progress',
-        abortSignal,
-      });
+      const loopRenderer = createZAIStreamRenderer(progress, abortSignal);
 
-      const streamAdapter = createGenericAdapter(
-        {
-          onThinking: async (text: string) => {
-            this.log.debug(`[Z] parsed <think> delta length: ${text.length}`);
-          },
-          onContent: async (text: string) => {
-            await loopRenderer.write(text);
-          },
-          onError: (error: Error, context: { type: string; chunk?: unknown }) => {
-            this.log.warn(`[Z] adapter callback error (${context.type}): ${String(error)}`);
-          },
-        },
-        {
-          parseThinkTags: true,
-          scrubContextTags: true,
-          enforcePrivacyTags: true,
-        },
-      );
+      // NOTE: this path used to run the visible text through
+      // createGenericAdapter() from @agentsy/providers, which is now removed. That
+      // adapter instantiated a *second* LLMStreamProcessor over text the inline
+      // parser had already cleaned, so the stream was parsed twice. Worse, it
+      // configured scrubContextTags: true, which buffers all text and releases it
+      // only on flush() - verified: five writes produced zero output, then one
+      // dump of the whole string at end(). So the adapter was not just redundant,
+      // it was breaking streaming for every response.
+      //
+      // The inline parser already strips control tokens and returns visible text
+      // per chunk, so that text is reported directly. Thinking arrives on
+      // normalized.thinking and goes to loopRenderer.writeChunk, which streams
+      // incrementally as a 'thinking' part.
 
       for await (const chunk of streamResult) {
         if (token.isCancellationRequested) {
@@ -1511,12 +1525,10 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
             done: rawFinishReason === 'stop' || rawFinishReason === 'tool_calls',
           });
 
-          // Emit visible text directly; this provider already owns the Progress surface.
+          // Emit visible text directly; the inline parser already stripped the
+          // control tokens, and this provider owns the Progress surface.
           if (parsedChunk.content.length > 0) {
-            await streamAdapter.write({
-              content: parsedChunk.content,
-              done: rawFinishReason === 'stop' || rawFinishReason === 'tool_calls',
-            });
+            await loopRenderer.write(parsedChunk.content);
           }
 
           // Feed the extracted deltas into the same accumulator the native
@@ -1604,7 +1616,6 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
         emittedToolCalls.add(dedupeKey);
       }
 
-      await streamAdapter.end();
       await loopRenderer.end();
 
       // Report usage metrics before finishing
