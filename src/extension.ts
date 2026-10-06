@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { ApiKeyManager, type IQuotaDataSource, type UsageQuota, UsageStatusBar } from './agentsy-native.js';
+import { ApiKeyManager } from './agentsy-native.js';
+import { type IQuotaDataSource, type UsageQuota, UsageStatusBar } from './usage-status-bar.js';
 import { ZMcpServerDefinitionProvider } from './mcp-server-definition-provider.js';
 import { ZChatModelProvider } from './provider.js';
 import { ZWebFetchTool, ZWebSearchTool } from './tools/web-tools.js';
@@ -122,6 +123,11 @@ export function activate(context: vscode.ExtensionContext) {
     return provider;
   };
 
+  const clearApiKey = async (): Promise<void> => {
+    await getProvider().clearApiKey();
+    await updateApiKeyContext();
+  };
+
   const updateApiKeyContext = async () => {
     const apiKey = await getApiKey();
     await vscode.commands.executeCommand(
@@ -141,7 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
         await updateApiKeyContext();
       }),
       vscode.commands.registerCommand('z-chat.manageSettings', () =>
-        showSettingsUI({ context, log: logOutputChannel, getApiKey }),
+        showSettingsUI({ context, log: logOutputChannel, getApiKey, clearApiKey }),
       ),
     );
   } catch (error) {
@@ -431,6 +437,29 @@ export function activate(context: vscode.ExtensionContext) {
     ],
   };
   context.subscriptions.push(participant);
+
+  // Integration-test handles, gated on ExtensionMode.Test so nothing is added to
+  // the production command surface: there is no `__test*` command in a normal
+  // install. The streaming e2e test needs the real registered provider, not a
+  // reconstruction, because the bug it guards (text buffered until the response
+  // completed) only appears when the whole chain runs: HTTP -> SSE -> provider
+  // -> VS Code progress surface.
+  if (context.extensionMode === vscode.ExtensionMode.Test) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('z-models-vscode.__testProvider', () => getProvider()),
+      vscode.commands.registerCommand('z-models-vscode.__testSeedApiKey', async (key: string) => {
+        // Through the manager, not context.secrets.store directly, because the
+        // manager caches the key in memory and that cache is exactly what a
+        // broken clear path leaves behind. Storing the secret directly would
+        // never populate it and the test would not be testing the real flow.
+        await apiKeyManager.setApiKey(key);
+        await getProvider().reinitializeClient();
+      }),
+      vscode.commands.registerCommand('z-models-vscode.__testClearApiKey', () =>
+        getProvider().clearApiKey(),
+      ),
+    );
+  }
 }
 
 export function deactivate() {

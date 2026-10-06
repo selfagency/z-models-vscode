@@ -241,7 +241,6 @@
     ]
   },
   "dependencies": {
-    "@agentsy/context": "^0.2.4",
     "@agentsy/core": "^0.2.0",
     "@agentsy/providers": "^0.2.0",
     "@agentsy/types": "^0.1.1",

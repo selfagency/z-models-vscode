@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@agentsy/context':
-        specifier: ^0.2.4
-        version: 0.2.4
       '@agentsy/core':
         specifier: ^0.2.0
         version: 0.2.0
@@ -92,9 +89,6 @@ importers:
         version: 8.8.5
 
 packages:
-
-  '@agentsy/context@0.2.4':
-    resolution: {integrity: sha512-4XctfbkcHRLryDIIRwAWnllhPgam6hzJarRpwFwwrLGZJAcoBFbt2QVPTMKq1pgwIFssIk89l6AZlRITE4qBaQ==}
 
   '@agentsy/core@0.2.0':
     resolution: {integrity: sha512-yZqWusdyyJ/mSQ3X63gaw/G5vjXE8tJg/8p73e1jGOWtcZLNakjSgL/GLs8SGuDUmHQWiIHuYGcggxfzDMbxtg==}
@@ -2598,8 +2592,6 @@ packages:
     hasBin: true
 
 snapshots:
-
-  '@agentsy/context@0.2.4': {}
 
   '@agentsy/core@0.2.0': {}
 

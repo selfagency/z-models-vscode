@@ -7,6 +7,12 @@ type Deps = {
   context: vscode.ExtensionContext;
   log: LogChannel;
   getApiKey: () => Promise<string | undefined>;
+  /**
+   * Clears the key through the provider so the HTTP client and the cached model
+   * list are dropped too. Deleting the secret directly leaves the provider
+   * holding a client that still sends the old key.
+   */
+  clearApiKey: () => Promise<void>;
 };
 
 // Separators have no `run`; `picked?.run?.()` handles that at the call site.
@@ -109,7 +115,7 @@ export async function showSettingsUI(deps: Deps): Promise<void> {
     {
       label: '$(trash) Clear stored API key',
       run: async () => {
-        await deps.context.secrets.delete('Z_API_KEY');
+        await deps.clearApiKey();
         await vscode.window.showInformationMessage(
           'Z.ai API key cleared. Run "Z: Manage API Key" to add a new one.',
         );

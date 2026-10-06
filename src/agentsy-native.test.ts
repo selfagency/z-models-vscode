@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import { commands, window } from 'vscode';
+import { LLMStreamProcessor } from '@agentsy/core/processor';
+import { createZAIStreamRenderer } from './provider.js';
 import {
   ApiKeyManager,
   calculateRetryDelay,
@@ -13,9 +15,9 @@ import {
   isRetryableError,
   McpServerRegistry,
   ProviderErrorCode,
-  UsageStatusBar,
   withRetry,
 } from './agentsy-native.js';
+import { UsageStatusBar } from './usage-status-bar.js';
 
 describe('error mapping', () => {
   it('maps HTTP status codes to provider error codes', () => {
@@ -216,6 +218,67 @@ describe('createVSCodeAgentLoop', () => {
     await loop.end();
     expect(markdown).toHaveBeenCalled();
     expect(progress).toHaveBeenCalledWith('reasoning');
+  });
+
+  it('emits each chunk as it arrives rather than one dump at end()', async () => {
+    // Regression guard. LLMStreamProcessor's default scrubContextTags: true
+    // holds text in a residual and releases it only on flush(), so a loop
+    // built with a default processor emits nothing until end() and the chat UI
+    // shows nothing until the response is complete. The provider supplies a
+    // processor with scrubContextTags: false; this pins that requirement.
+    const markdown = vi.fn();
+    const loop = createVSCodeAgentLoop({
+      stream: { markdown },
+      showThinking: false,
+      processor: new LLMStreamProcessor({ scrubContextTags: false }),
+    });
+
+    await loop.write('Hello ');
+    await loop.write('world');
+
+    expect(markdown).toHaveBeenCalledTimes(2);
+    expect(markdown).toHaveBeenNthCalledWith(1, 'Hello ');
+    expect(markdown).toHaveBeenNthCalledWith(2, 'world');
+
+    await loop.end();
+  });
+
+  it('does not emit text before a chunk arrives', async () => {
+    const markdown = vi.fn();
+    const loop = createVSCodeAgentLoop({
+      stream: { markdown },
+      showThinking: false,
+      processor: new LLMStreamProcessor({ scrubContextTags: false }),
+    });
+
+    expect(markdown).not.toHaveBeenCalled();
+    await loop.write('x');
+    expect(markdown).toHaveBeenCalledTimes(1);
+    await loop.end();
+  });
+});
+
+describe('createZAIStreamRenderer', () => {
+  it('streams text incrementally through the provider wiring', async () => {
+    // This is the assertion that matters. A previous test built its own
+    // streaming processor, which pinned the library but not our wiring - it
+    // still passed after the provider was reverted to the buffering default.
+    // This drives the same factory provideLanguageModelChatResponse uses.
+    const report = vi.fn();
+    const loop = createZAIStreamRenderer({ report } as never, new AbortController().signal);
+
+    const textAfterEachWrite: string[] = [];
+    for (const chunk of ['Hello ', 'world.']) {
+      await loop.write(chunk);
+      const parts = report.mock.calls
+        .map((c) => c[0] as { value?: string; constructor?: { name?: string } })
+        .filter((p) => p?.constructor?.name === 'LanguageModelTextPart');
+      textAfterEachWrite.push(parts.map((p) => p.value).join(''));
+    }
+
+    expect(textAfterEachWrite).toEqual(['Hello ', 'Hello world.']);
+
+    await loop.end();
   });
 });
 

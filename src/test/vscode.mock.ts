@@ -124,6 +124,12 @@ export class LanguageModelError extends Error {
   }
 }
 
+export enum ExtensionMode {
+  Production = 1,
+  Development = 2,
+  Test = 3,
+}
+
 export const StatusBarAlignment = {
   Left: 1,
   Right: 2,

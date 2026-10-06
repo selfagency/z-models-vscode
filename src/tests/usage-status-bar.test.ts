@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
-import { type IQuotaDataSource, type UsageQuota, UsageStatusBar } from '../agentsy-native.js';
+import { type IQuotaDataSource, type UsageQuota, UsageStatusBar } from '../usage-status-bar.js';
 
 /**
  * Lifecycle regression tests for issue #20 / the Marketplace "pure DDoS client"

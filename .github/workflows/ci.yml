@@ -81,6 +81,14 @@ jobs:
       - name: Compile
         run: pnpm run compile
 
+      - name: Integration tests (Extension Development Host)
+        # Runs the extension inside a real VS Code instance. This is the only
+        # place the streaming path is covered end to end: a local HTTP server
+        # speaks Z.ai's SSE dialect and the test asserts text reaches the chat
+        # surface *before* the response finishes. The unit tests cannot do this
+        # because they construct their own stream.
+        run: xvfb-run -a pnpm run test:extension
+
       - name: Run tests
         run: xvfb-run -a pnpm test:coverage --reporter=default --reporter=junit --outputFile=test-report.junit.xml
         env:
