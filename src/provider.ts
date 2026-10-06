@@ -361,7 +361,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
   private accumulatedReasoningContent = '';
   // User-Agent header for API requests
   private readonly userAgent: string;
-  private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>;
+  private readonly apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey' | 'deleteApiKey'>;
 
   private getConfiguredBaseUrl(): string {
     return getConfiguredBaseUrl();
@@ -986,7 +986,7 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     // Default is false to avoid prompting during unit tests which instantiate the provider.
     autoInit: boolean = false,
     userAgent?: string,
-    apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey'>,
+    apiKeyManager?: Pick<ApiKeyManager, 'getApiKey' | 'setApiKey' | 'deleteApiKey'>,
   ) {
     // Accept an optional logOutputChannel to keep tests simple. Provide a no-op fallback when not available.
     if (logOutputChannel) {
@@ -1008,6 +1008,25 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
     this.apiKeyManager = apiKeyManager;
 
     this.loadMCPConfig();
+
+    // Any change to the stored key must invalidate the derived state. Without
+    // this, a key written by a path other than setApiKey() - the settings UI,
+    // Settings Sync, a manual secret edit - leaves the provider holding an HTTP
+    // client that still sends the old key plus a cached model list, and the
+    // model picker keeps advertising models the user can no longer use. Only a
+    // reload recovered.
+    this.context.subscriptions.push(
+      this.context.secrets.onDidChange(event => {
+        if (event.key !== 'Z_API_KEY') {
+          return;
+        }
+        this.log.info('[Z] Stored API key changed, resetting client and model cache');
+        this.client = null;
+        this.fetchedModels = null;
+        this.modelCacheTimestamp = 0;
+        this._onDidChangeLanguageModelChatInformation.fire(undefined);
+      }),
+    );
 
     this.context.subscriptions.push(
       workspace.onDidChangeConfiguration(event => {
@@ -1261,6 +1280,54 @@ export class ZChatModelProvider implements LanguageModelChatProvider {
 
     return apiKey;
   }
+
+  /**
+ * Rebuild the HTTP client from whatever is currently in secret storage.
+ *
+ * Seeding or replacing a key without going through the UI leaves the provider
+ * holding the previous client, so the next request would use the old key. The
+ * settings UI and the prompt path both reset explicitly for the same reason.
+ */
+public async reinitializeClient(): Promise<boolean> {
+  this.client = null;
+  this.fetchedModels = null;
+  this.modelCacheTimestamp = 0;
+  const initialized = await this.initClient(true);
+  this._onDidChangeLanguageModelChatInformation.fire(undefined);
+  return initialized;
+}
+
+/**
+ * Clear the stored API key and drop everything derived from it.
+ *
+ * Deleting the secret directly is not enough, for two independent reasons:
+ *
+ *  1. ApiKeyManager caches the key in memory and getApiKey() returns that cache
+ *     without re-reading storage. Clearing only secret storage leaves the old key
+ *     live, so initClient rebuilds the HTTP client with it and requests keep
+ *     carrying a key the user just removed.
+ *  2. The provider holds its own HTTP client and cached model list, so the
+ *     picker keeps advertising models the user can no longer use.
+ *
+ * Delegating to ApiKeyManager.deleteApiKey() handles both the storage and the
+ * cache, then the reset below refreshes the catalog.
+ */
+public async clearApiKey(): Promise<void> {
+  if (this.apiKeyManager?.deleteApiKey) {
+    await this.apiKeyManager.deleteApiKey();
+  } else {
+    try {
+      await this.context.secrets.delete('Z_API_KEY');
+    } catch (e) {
+      this.log.warn(`[Z] Failed to delete API key from secret storage: ${String(e)}`);
+    }
+  }
+  this.client = null;
+  this.fetchedModels = null;
+  this.modelCacheTimestamp = 0;
+  this._onDidChangeLanguageModelChatInformation.fire(undefined);
+  this.log.info('[Z] API key cleared, client and model cache reset');
+}
 
   /**
    * Initialize the Zhipu AI client.

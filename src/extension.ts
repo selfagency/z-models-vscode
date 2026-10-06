@@ -123,6 +123,11 @@ export function activate(context: vscode.ExtensionContext) {
     return provider;
   };
 
+  const clearApiKey = async (): Promise<void> => {
+    await getProvider().clearApiKey();
+    await updateApiKeyContext();
+  };
+
   const updateApiKeyContext = async () => {
     const apiKey = await getApiKey();
     await vscode.commands.executeCommand(
@@ -142,7 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
         await updateApiKeyContext();
       }),
       vscode.commands.registerCommand('z-chat.manageSettings', () =>
-        showSettingsUI({ context, log: logOutputChannel, getApiKey }),
+        showSettingsUI({ context, log: logOutputChannel, getApiKey, clearApiKey }),
       ),
     );
   } catch (error) {
@@ -442,11 +447,16 @@ export function activate(context: vscode.ExtensionContext) {
   if (context.extensionMode === vscode.ExtensionMode.Test) {
     context.subscriptions.push(
       vscode.commands.registerCommand('z-models-vscode.__testProvider', () => getProvider()),
-      vscode.commands.registerCommand('z-models-vscode.__testSeedApiKey', (key: string) =>
-        context.secrets.store('Z_API_KEY', key),
-      ),
+      vscode.commands.registerCommand('z-models-vscode.__testSeedApiKey', async (key: string) => {
+        // Through the manager, not context.secrets.store directly, because the
+        // manager caches the key in memory and that cache is exactly what a
+        // broken clear path leaves behind. Storing the secret directly would
+        // never populate it and the test would not be testing the real flow.
+        await apiKeyManager.setApiKey(key);
+        await getProvider().reinitializeClient();
+      }),
       vscode.commands.registerCommand('z-models-vscode.__testClearApiKey', () =>
-        context.secrets.delete('Z_API_KEY'),
+        getProvider().clearApiKey(),
       ),
     );
   }
