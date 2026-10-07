@@ -175,7 +175,6 @@ describe('ApiKeyManager', () => {
 
 describe('UsageStatusBar', () => {
   it('shows, updates display, and hides', async () => {
-    const item = window.createStatusBarItem() as unknown as vscode.StatusBarItem;
     const dataSource = {
       refreshQuota: vi.fn().mockResolvedValue({
         used: 80,
@@ -188,6 +187,9 @@ describe('UsageStatusBar', () => {
     };
     const bar = new UsageStatusBar({ displayName: 'Z.ai Usage', quotaDataSource: dataSource, refreshIntervalMs: 1000 });
     await bar.show();
+    // The mock returns a distinct item per call, so read back the one the bar made.
+    const item = (window.createStatusBarItem as unknown as ReturnType<typeof vi.fn>).mock.results.at(-1)!
+      .value as vscode.StatusBarItem;
     expect(item.text).toContain('Z.ai Usage');
     expect(item.show).toHaveBeenCalled();
     const quota = await bar.refresh();

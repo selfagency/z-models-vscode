@@ -5,7 +5,10 @@ vi.mock('got', () => ({
   default: vi.fn(),
 }));
 
-type GotMock = { mockImplementation: (fn: (url: string) => { text: () => Promise<string> }) => void };
+type GotMock = {
+  mockImplementation: (fn: (url: string, options: unknown) => { text: () => Promise<string> }) => void;
+  mock: { calls: unknown[][] };
+};
 
 type ServiceWithApiKey = { apiKey: string };
 
@@ -26,6 +29,13 @@ const quotaBody = {
         nextResetTime: 18000000,
       },
       {
+        type: 'TOKENS_LIMIT',
+        unit: 6,
+        number: 1,
+        percentage: 12,
+        nextResetTime: 2592000000,
+      },
+      {
         type: 'TIME_LIMIT',
         unit: 5,
         number: 1,
@@ -36,15 +46,6 @@ const quotaBody = {
         nextResetTime: 2592000000,
       },
     ],
-  },
-};
-
-const modelUsageBody = {
-  data: {
-    totalUsage: {
-      totalModelCallCount: 10,
-      totalTokensUsage: 5000,
-    },
   },
 };
 
@@ -69,12 +70,11 @@ describe('UsageService', () => {
     expect(result.error).toBe('API key not configured');
   });
 
-  it('returns a FetchResult with parsed UsageData on a successful fetch', async () => {
+  it('parses quota windows, MCP time limits, and plan level on a successful fetch', async () => {
     const { default: got } = vi.mocked(await import('got'));
-    (got as unknown as GotMock).mockImplementation((url: string) => {
-      const body = String(url).includes('quota/limit') ? quotaBody : modelUsageBody;
-      return { text: vi.fn().mockResolvedValue(JSON.stringify(body)) };
-    });
+    (got as unknown as GotMock).mockImplementation(() => ({
+      text: vi.fn().mockResolvedValue(JSON.stringify(quotaBody)),
+    }));
 
     const service = new UsageService('secret-key');
     const result = await service.fetchUsage();
@@ -82,13 +82,19 @@ describe('UsageService', () => {
     expect(result.success).toBe(true);
     const data = requireData(result);
     expect(data.planLevel).toBe('pro');
-    expect(data.tokenQuotas).toHaveLength(1);
+    expect(data.tokenQuotas).toHaveLength(2);
     expect(data.tokenQuotas[0]).toMatchObject({
       windowName: '5-Hours',
       unit: 3,
       number: 5,
       percentage: 50,
       nextResetTime: 18000000,
+    });
+    expect(data.tokenQuotas[1]).toMatchObject({
+      windowName: '1-Week',
+      unit: 6,
+      number: 1,
+      percentage: 12,
     });
     expect(data.timeLimits).toHaveLength(1);
     expect(data.timeLimits[0]).toMatchObject({
@@ -101,32 +107,37 @@ describe('UsageService', () => {
       remaining: 75,
       nextResetTime: 2592000000,
     });
-    expect(data.todayPrompts).toBe(10);
-    expect(data.todayTokens).toBe(5000);
-    expect(data.sevenDayPrompts).toBe(10);
-    expect(data.sevenDayTokens).toBe(5000);
-    expect(data.thirtyDayPrompts).toBe(10);
-    expect(data.thirtyDayTokens).toBe(5000);
     expect(data.lastUpdated).toBeInstanceOf(Date);
     expect(data.connectionStatus).toBe('connected');
   });
 
-  it('degrades gracefully to empty data when the HTTP layer throws', async () => {
+  it('issues exactly one request with a Bearer Authorization header', async () => {
+    const { default: got } = vi.mocked(await import('got'));
+    const mock = got as unknown as GotMock;
+    let capturedHeaders: Record<string, string> | undefined;
+    mock.mockImplementation((_url, options) => {
+      capturedHeaders = (options as { headers: Record<string, string> }).headers;
+      return { text: vi.fn().mockResolvedValue(JSON.stringify(quotaBody)) };
+    });
+
+    await new UsageService('secret-key').fetchUsage();
+
+    // Regression guard: the status bar auto-refreshes, so extra calls here
+    // multiply against the poll timer.
+    expect(mock.mock.calls).toHaveLength(1);
+    expect(String(mock.mock.calls[0]![0])).toContain('quota/limit');
+    expect(capturedHeaders?.Authorization).toBe('Bearer secret-key');
+  });
+
+  it('returns success:false when the HTTP layer throws', async () => {
     const { default: got } = vi.mocked(await import('got'));
     (got as unknown as GotMock).mockImplementation(() => {
       throw new Error('network down');
     });
 
-    const service = new UsageService('secret-key');
-    const result = await service.fetchUsage();
+    const result = await new UsageService('secret-key').fetchUsage();
 
-    // Promise.allSettled swallows per-endpoint failures, so the fetch still
-    // resolves with empty usage data rather than rejecting.
-    expect(result.success).toBe(true);
-    const data = requireData(result);
-    expect(data.tokenQuotas).toEqual([]);
-    expect(data.timeLimits).toEqual([]);
-    expect(data.todayPrompts).toBe(0);
-    expect(data.todayTokens).toBe(0);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('network down');
   });
 });
